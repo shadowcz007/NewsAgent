@@ -4,6 +4,9 @@ import React, { useState, useRef, useEffect } from "react";
 import { MessageCircle } from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
 
 interface Message {
   id: string;
@@ -17,6 +20,8 @@ export function ChatSection() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { data: session } = useSession();
+  const router = useRouter();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -27,6 +32,11 @@ export function ChatSection() {
   }, [messages]);
 
   const handleSend = async (message: string) => {
+    // 如果未登录，不处理消息
+    if (!session) {
+      return;
+    }
+
     const userMessage: Message = {
       id: Date.now().toString(),
       message,
@@ -151,25 +161,38 @@ export function ChatSection() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
-        {messages.length === 0 && (
-          <div className="text-center text-muted-foreground py-8">
-            Start a conversation with the AI assistant
+        {!session ? (
+          <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
+            <p className="text-muted-foreground">
+              请登录以使用 AI 助手功能
+            </p>
+            <Button onClick={() => router.push("/auth/login")} variant="outline">
+              登录
+            </Button>
           </div>
+        ) : (
+          <>
+            {messages.length === 0 && (
+              <div className="text-center text-muted-foreground py-8">
+                Start a conversation with the AI assistant
+              </div>
+            )}
+            {messages.map((msg) => (
+              <ChatMessage
+                key={msg.id}
+                message={msg.message || (msg.isUser ? "" : "正在思考...")}
+                isUser={msg.isUser}
+                timestamp={msg.timestamp}
+                sources={msg.sources}
+              />
+            ))}
+            <div ref={messagesEndRef} />
+          </>
         )}
-        {messages.map((msg) => (
-          <ChatMessage
-            key={msg.id}
-            message={msg.message || (msg.isUser ? "" : "正在思考...")}
-            isUser={msg.isUser}
-            timestamp={msg.timestamp}
-            sources={msg.sources}
-          />
-        ))}
-        <div ref={messagesEndRef} />
       </div>
 
       <div className="flex-shrink-0">
-        <ChatInput onSend={handleSend} disabled={isLoading} />
+        <ChatInput onSend={handleSend} disabled={isLoading || !session} />
       </div>
     </div>
   );
