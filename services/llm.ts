@@ -456,14 +456,17 @@ function parseJsonResponse(response: string, batchNumber: number): TranslatedIte
     // 策略 9: 字段级重建
     () => {
       console.log(`第 ${batchNumber} 批：尝试策略 9 - 字段级重建`);
-      // 使用正则提取所有字段
+      // 先修复中文标点
+      const cleaned = fixCommonJsonIssues(response);
+      
+      // 使用正则提取所有字段，支持更多变体
       const titlePattern = /"translated_title"\s*:\s*"([^"]+)"/g;
       const urlPattern = /"source_url"\s*:\s*"([^"]+)"/g;
       const categoryPattern = /"category"\s*:\s*"([^"]+)"/g;
       
-      const titles = Array.from(response.matchAll(titlePattern), m => m[1]);
-      const urls = Array.from(response.matchAll(urlPattern), m => m[1]);
-      const categories = Array.from(response.matchAll(categoryPattern), m => m[1]);
+      const titles = Array.from(cleaned.matchAll(titlePattern), m => m[1]);
+      const urls = Array.from(cleaned.matchAll(urlPattern), m => m[1]);
+      const categories = Array.from(cleaned.matchAll(categoryPattern), m => m[1]);
       
       if (titles.length === 0 || urls.length === 0 || categories.length === 0) {
         throw new Error('Could not extract required fields');
