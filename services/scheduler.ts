@@ -2,29 +2,33 @@ import cron from 'node-cron';
 import { processAndSaveHotspots } from './briefing';
 import { cleanCache } from './cache';
 
-let isRunning = false;
+let currentTask: Promise<void> | null = null;
 
-// 定时任务：每5分钟拉取热点
+// 定时任务：每2小时拉取热点
 export function startScheduler() {
   console.log('Starting scheduler...');
 
-  // 每5分钟执行一次热点拉取和处理
-  cron.schedule('*/5 * * * *', async () => {
-    if (isRunning) {
-      console.log('Previous task still running, skipping...');
-      return;
+  // 每2小时执行一次热点拉取和处理
+  cron.schedule('0 */2 * * *', async () => {
+    // 等待上一次任务完成
+    if (currentTask) {
+      console.log('Previous task still running, waiting...');
+      await currentTask;
     }
 
-    try {
-      isRunning = true;
-      console.log('Running scheduled task: Fetching and processing hotspots...');
-      await processAndSaveHotspots();
-      console.log('Scheduled task completed successfully');
-    } catch (error) {
-      console.error('Error in scheduled task:', error);
-    } finally {
-      isRunning = false;
-    }
+    // 执行新任务
+    currentTask = (async () => {
+      try {
+        console.log('Running scheduled task: Fetching and processing hotspots...');
+        await processAndSaveHotspots();
+        console.log('Scheduled task completed successfully');
+      } catch (error) {
+        console.error('Error in scheduled task:', error);
+      }
+    })();
+
+    await currentTask;
+    currentTask = null;
   });
 
   // 每小时清理一次过期缓存
