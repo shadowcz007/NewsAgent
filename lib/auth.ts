@@ -26,3 +26,4 @@ export async function getUserById(id: number) {
   return stmt.get(id) as { id: number; email: string; name: string | null; created_at: string } | undefined;
 }
 
+

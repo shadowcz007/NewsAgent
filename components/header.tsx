@@ -59,13 +59,23 @@ export function Header({ onSearch, onCategoryChange, currentCategory = "All" }: 
     if (onCategoryChange) {
       onCategoryChange(value);
     }
+    // 点击分类标签时导航到首页
+    router.push("/");
+  };
+
+  const handleLogoClick = () => {
+    // 点击logo或标题时导航到首页
+    router.push("/");
   };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center justify-between px-4">
         {/* Logo and Title */}
-        <div className="flex items-center gap-2">
+        <div 
+          className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+          onClick={handleLogoClick}
+        >
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <span className="text-lg font-bold">Hot AI</span>
           </div>

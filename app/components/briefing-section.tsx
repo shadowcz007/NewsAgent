@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/select";
 import { BriefingCard } from "./briefing-card";
 import useSWR from "swr";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url, {
@@ -31,6 +33,8 @@ interface BriefingSectionProps {
 export function BriefingSection({ searchQuery = "", category = "All" }: BriefingSectionProps) {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [language, setLanguage] = useState("English");
+  const { data: session } = useSession();
+  const router = useRouter();
 
   // 构建 API URL
   const apiUrl = `/api/hotspots?${new URLSearchParams({
@@ -38,9 +42,36 @@ export function BriefingSection({ searchQuery = "", category = "All" }: Briefing
     category: category === "All" ? "" : category,
   })}`;
 
-  const { data: hotspots, error, isLoading } = useSWR(apiUrl, fetcher, {
-    refreshInterval: 300000, // 每5分钟刷新
-  });
+  // 只有在已登录时才获取数据
+  const { data: hotspots, error, isLoading } = useSWR(
+    session ? apiUrl : null,
+    fetcher,
+    {
+      refreshInterval: 300000, // 每5分钟刷新
+    }
+  );
+
+  // 如果未登录，显示欢迎提示
+  if (!session) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-3xl font-bold">Real-Time Briefings</h2>
+        </div>
+        <div className="text-center py-16">
+          <div className="max-w-md mx-auto space-y-4">
+            <h3 className="text-2xl font-semibold text-foreground">欢迎使用 Hot Topics AI</h3>
+            <p className="text-muted-foreground">
+              请登录以查看实时新闻摘要和热点话题
+            </p>
+            <Button onClick={() => router.push("/auth/login")} className="mt-4">
+              登录
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

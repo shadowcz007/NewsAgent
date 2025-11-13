@@ -797,13 +797,17 @@ export async function generateBriefing(
       }
     }
 
-    return { briefing, sources };
+    // 去重 sources
+    const uniqueSources = Array.from(new Set(sources));
+
+    return { briefing, sources: uniqueSources };
   } catch (error: any) {
     console.error('Error in generateBriefing:', error);
     // 返回简单的后备简报
+    const fallbackSources = Array.from(new Set(items.map(item => item.source_url)));
     return {
       briefing: `今日共收集 ${items.length} 条热点资讯，涵盖多个领域。`,
-      sources: items.map(item => item.source_url),
+      sources: fallbackSources,
     };
   }
 }
@@ -833,11 +837,45 @@ export async function* generateBriefingStream(
 
   try {
     let fullResponse = '';
+    let outputBuffer = '';
+    let foundSeparator = false;
     
     // 流式获取响应
     for await (const chunk of callSiliconFlowStream(messages, LLM_MODEL_BRIEFING)) {
       fullResponse += chunk;
-      yield { type: 'content', text: chunk };
+      
+      // 如果已经找到分隔符，不再输出内容，只收集用于提取 sources
+      if (foundSeparator) {
+        continue;
+      }
+      
+      // 将 chunk 添加到 buffer
+      outputBuffer += chunk;
+      
+      // 检测是否遇到两个连续换行符（第一段和第二段的分隔符）
+      const separatorIndex = outputBuffer.indexOf('\n\n');
+      if (separatorIndex !== -1) {
+        // 找到分隔符，只输出第一段内容
+        const firstParagraph = outputBuffer.substring(0, separatorIndex);
+        if (firstParagraph) {
+          yield { type: 'content', text: firstParagraph };
+        }
+        foundSeparator = true;
+        outputBuffer = '';
+      } else if (outputBuffer.length > 3) {
+        // 还没找到分隔符，但 buffer 已经足够长，可以安全输出前面的部分
+        // 保留最后 3 个字符在 buffer 中（防止 \n\n 跨 chunk）
+        const safeToOutput = outputBuffer.substring(0, outputBuffer.length - 3);
+        if (safeToOutput) {
+          yield { type: 'content', text: safeToOutput };
+        }
+        outputBuffer = outputBuffer.slice(-3);
+      }
+    }
+    
+    // 流结束，如果还有 buffer 中的内容且没找到分隔符，输出剩余内容
+    if (!foundSeparator && outputBuffer) {
+      yield { type: 'content', text: outputBuffer };
     }
 
     // 解析两段格式提取来源
@@ -858,12 +896,16 @@ export async function* generateBriefingStream(
       sources.push(...items.map(item => item.source_url));
     }
 
-    yield { type: 'done', sources };
+    // 去重 sources
+    const uniqueSources = Array.from(new Set(sources));
+
+    yield { type: 'done', sources: uniqueSources };
   } catch (error: any) {
     console.error('Error in generateBriefingStream:', error);
     // 返回错误信息
+    const fallbackSources = Array.from(new Set(items.map(item => item.source_url)));
     yield { type: 'content', text: `今日共收集 ${items.length} 条热点资讯，涵盖多个领域。` };
-    yield { type: 'done', sources: items.map(item => item.source_url) };
+    yield { type: 'done', sources: fallbackSources };
   }
 }
 
