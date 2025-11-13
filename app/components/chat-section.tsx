@@ -10,6 +10,7 @@ interface Message {
   message: string;
   isUser: boolean;
   timestamp: string;
+  sources?: string[];
 }
 
 export function ChatSection() {
@@ -52,6 +53,7 @@ export function ChatSection() {
         message: data.response || "Sorry, I couldn't process that request.",
         isUser: false,
         timestamp: new Date().toLocaleTimeString(),
+        sources: data.sources || [],
       };
 
       setMessages((prev) => [...prev, aiMessage]);
@@ -88,6 +90,7 @@ export function ChatSection() {
             message={msg.message}
             isUser={msg.isUser}
             timestamp={msg.timestamp}
+            sources={msg.sources}
           />
         ))}
         {isLoading && (
