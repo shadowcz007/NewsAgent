@@ -9,6 +9,13 @@ import {
 } from '@/lib/constants';
 import { HotspotItem } from './hotspot';
 
+// 分类结果数据结构
+export interface ClassificationResult {
+  categories: string[];
+  timeRange: number | null;
+  keywords: string[];
+}
+
 export interface TranslatedItem {
   translated_title: string;
   source_url: string;
@@ -75,7 +82,7 @@ const BRIEFING_PROMPT = `你是一个敏锐的 AI 创业观察者，以「创业
 - 语气带判断、有情绪，像你真的会记在备忘录里的那句话。  
 
 **若用户提供了自定义要求**：  
-- 严格按用户要求生成 140 字内简报，仍保持精炼、洞察导向、拒绝泛泛而谈。  
+- 严格按用户要求处理输入的资讯条目列表，生成 140 字内简报，仍保持精炼、洞察导向、拒绝泛泛而谈。  
 
 **输出格式固定为两段**：  
 1. **第一段**：140 字内的日记体简报（含情绪与判断）。  
@@ -716,29 +723,169 @@ export async function generateBriefing(
   }
 }
 
-// 根据用户输入从可用分类中挑选相关分类
+/**
+ * 解析分类结果 JSON 对象（复用现有 JSON 解析逻辑）
+ * 支持多种容错策略，处理 markdown、中文标点等问题
+ */
+function parseClassificationResult(response: string): ClassificationResult {
+  const strategies: Array<() => [string, any]> = [
+    // 策略 1: 直接解析
+    () => {
+      return [response, JSON.parse(response)];
+    },
+    
+    // 策略 2: 移除 markdown 代码块后解析
+    () => {
+      const cleaned = response.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      return [cleaned, JSON.parse(cleaned)];
+    },
+    
+    // 策略 3: 使用正则提取 JSON 对象并修复常见问题
+    () => {
+      let cleaned = response.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      
+      // 尝试找到第一个 { 到最后一个 }
+      const startObject = cleaned.indexOf('{');
+      const endObject = cleaned.lastIndexOf('}');
+      
+      if (startObject === -1 || endObject === -1 || startObject >= endObject) {
+        throw new Error('No valid JSON object structure found');
+      }
+      
+      const jsonStr = cleaned.substring(startObject, endObject + 1);
+      const fixed = fixCommonJsonIssues(jsonStr);
+      return [fixed, JSON.parse(fixed)];
+    },
+    
+    // 策略 4: 逐行清理后解析
+    () => {
+      const lines = response.split('\n');
+      const jsonLines = lines.filter(line => {
+        const trimmed = line.trim();
+        return trimmed && 
+               !trimmed.startsWith('```') && 
+               !trimmed.startsWith('//') &&
+               !trimmed.startsWith('#');
+      });
+      const cleaned = jsonLines.join('\n').trim();
+      const fixed = fixCommonJsonIssues(cleaned);
+      return [fixed, JSON.parse(fixed)];
+    },
+    
+    // 策略 5: 贪婪对象提取
+    () => {
+      const greedyMatch = response.match(/\{[\s\S]*\}/);
+      if (!greedyMatch) {
+        throw new Error('No object structure found with greedy match');
+      }
+      const fixed = fixCommonJsonIssues(greedyMatch[0]);
+      return [fixed, JSON.parse(fixed)];
+    },
+    
+    // 策略 6: 字段级重建
+    () => {
+      const cleaned = fixCommonJsonIssues(response);
+      
+      // 提取各个字段
+      const categoriesMatch = cleaned.match(/"categories"\s*:\s*(\[[\s\S]*?\])/);
+      const timeRangeMatch = cleaned.match(/"timeRange"\s*:\s*(\d+|null)/);
+      const keywordsMatch = cleaned.match(/"keywords"\s*:\s*(\[[\s\S]*?\])/);
+      
+      const result: any = {
+        categories: categoriesMatch ? JSON.parse(categoriesMatch[1]) : [],
+        timeRange: timeRangeMatch ? (timeRangeMatch[1] === 'null' ? null : parseInt(timeRangeMatch[1])) : null,
+        keywords: keywordsMatch ? JSON.parse(keywordsMatch[1]) : [],
+      };
+      
+      const processedStr = JSON.stringify(result);
+      return [processedStr, result];
+    },
+  ];
+  
+  // 依次尝试每个策略
+  let lastError: any = null;
+  
+  for (let i = 0; i < strategies.length; i++) {
+    try {
+      const [processedString, result] = strategies[i]();
+      
+      // 验证结果是对象
+      if (typeof result !== 'object' || result === null || Array.isArray(result)) {
+        throw new Error('Parsed result is not an object');
+      }
+      
+      // 验证必需字段
+      if (!Array.isArray(result.categories)) {
+        throw new Error('categories field is missing or not an array');
+      }
+      
+      return {
+        categories: Array.isArray(result.categories) ? result.categories : [],
+        timeRange: typeof result.timeRange === 'number' ? result.timeRange : (result.timeRange === null ? null : null),
+        keywords: Array.isArray(result.keywords) ? result.keywords : [],
+      };
+    } catch (error: any) {
+      lastError = error;
+      console.log(`分类结果解析策略 ${i + 1} 失败: ${error.message}`);
+    }
+  }
+  
+  // 所有策略都失败
+  throw new Error(`所有解析策略都失败。最后错误: ${lastError?.message || 'Unknown'}`);
+}
+
+// 根据用户输入从可用分类中挑选相关分类，并提取时间范围和关键词
 export async function classifyCategoriesFromInput(
   requirement: string,
   availableCategories: string[]
-): Promise<string[]> {
+): Promise<ClassificationResult> {
   if (!requirement || !requirement.trim() || availableCategories.length === 0) {
-    return [];
+    return {
+      categories: [],
+      timeRange: null,
+      keywords: [],
+    };
   }
 
   const categoryList = availableCategories.join('、');
-  const systemPrompt = `你是一个资讯分类助手。系统将提供一个用户的简报需求描述，以及可供选择的资讯分类列表。你的任务是：
-1. 仔细理解用户输入描述的关注重点。
-2. 从提供的分类列表中选择所有有助于满足该需求的分类（可选择多个或全部）。
-3. 如果用户需求比较泛泛或看不出明显倾向，也应选择所有与科技创业主题相关的分类，以确保覆盖面。
-4. 严禁发明列表中不存在的分类。
+  const systemPrompt = `你是一个资讯分类和检索助手。系统将提供一个用户的简报需求描述，以及可供选择的资讯分类列表。你的任务是：
 
-返回格式必须是 JSON 数组，元素为所选分类的名称字符串。例如：["技术工具","前沿研究"]。不要输出额外文字。`;
+1. **分类识别**：从提供的分类列表中选择所有有助于满足该需求的分类（可选择多个或全部）。如果用户需求比较泛泛或看不出明显倾向，也应选择所有与科技创业主题相关的分类，以确保覆盖面。严禁发明列表中不存在的分类。
+
+2. **时间范围识别**：根据用户输入判断时间范围需求。如果用户提到"最近1天"、"今天"、"今日"等，返回1；如果提到"最近3天"、"近三天"等，返回3；如果提到"最近7天"、"本周"、"近一周"等，返回7；如果提到"最近30天"、"本月"、"近一个月"等，返回30；如果用户没有明确时间要求，返回null。
+
+3. **关键词提取**：从用户输入中提取检索命名实体词，并**自动生成尽可能多的同义词、中英文、缩写等变体**，以提高搜索引擎检索覆盖率。这些关键词将用于 SQL LIKE 模糊搜索（OR 逻辑），因此变体越多，检索覆盖率越高。
+
+**生成规则**：
+- 为每个核心概念生成尽可能多的相关词汇变体
+- 包含同义词、近义词、相关术语
+- 包含中英文对照（如：AI / 人工智能 / artificial intelligence）
+- 包含缩写和全称（如：LLM / 大语言模型 / Large Language Model）
+- 包含大小写变体（如：AI / ai / Ai）
+- 包含常见行业术语和表达方式
+- 包含相关概念扩展（如：AI 可扩展为：机器学习、深度学习、神经网络等）
+
+**示例**：
+- AI 相关：["AI", "ai", "Ai", "人工智能", "智能", "artificial intelligence", "Artificial Intelligence", "机器学习", "machine learning", "ML", "深度学习", "deep learning", "神经网络", "neural network"]
+- API 相关：["API", "api", "接口", "应用程序接口", "application programming interface", "Application Programming Interface", "REST API", "GraphQL", "Web API"]
+- LLM 相关：["LLM", "llm", "大语言模型", "大模型", "Large Language Model", "语言模型", "language model", "GPT", "ChatGPT", "生成式AI", "generative AI"]
+
+命名实体词应该是有助于检索相关资讯的核心词汇。
+
+返回格式必须是 JSON 对象，包含三个字段：
+- categories: 字符串数组，所选分类的名称
+- timeRange: 数字（1、3、7、30等）或null，表示时间范围（天数）
+- keywords: 字符串数组，检索关键词列表（**必须包含尽可能多的同义词、中英文、缩写等变体**）
+
+示例：{"categories":["技术工具","前沿研究"],"timeRange":3,"keywords":["AI","ai","Ai","人工智能","智能","artificial intelligence","Artificial Intelligence","机器学习","machine learning","ML","LLM","llm","大语言模型","大模型","Large Language Model"]}
+
+不要输出额外文字，只返回JSON对象。`;
 
   const userPrompt = `用户需求：${requirement.trim()}
 
 可用分类（保持原文选择）：${categoryList}
 
-请直接返回最合适的分类 JSON 数组。`;
+请分析用户需求，返回包含分类、时间范围和关键词的JSON对象。`;
 
   try {
     const response = await callSiliconFlow([
@@ -746,37 +893,46 @@ export async function classifyCategoriesFromInput(
       { role: 'user', content: userPrompt },
     ], 0, 3, LLM_MODEL_CLASSIFY);
 
-    const cleaned = response.replace(/```json/gi, '').replace(/```/g, '').trim();
-    const jsonMatch = cleaned.match(/(\[[\s\S]*\])/);
-    const target = jsonMatch ? jsonMatch[0] : cleaned;
+    // 使用容错解析函数
+    const parsed = parseClassificationResult(response);
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(target);
-    } catch (error) {
-      // 尝试逗号或换行分隔的文本
-      const fallbackList = cleaned
-        .split(/[\n,]/)
-        .map((item) => item.trim())
-        .filter(Boolean);
-      parsed = fallbackList;
-    }
-
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
+    // 验证和过滤分类
     const availableSet = new Set(availableCategories);
-    const result: string[] = [];
-    for (const item of parsed) {
-      if (typeof item === 'string' && availableSet.has(item) && !result.includes(item)) {
-        result.push(item);
+    const validCategories: string[] = [];
+    for (const item of parsed.categories) {
+      if (typeof item === 'string' && availableSet.has(item) && !validCategories.includes(item)) {
+        validCategories.push(item);
       }
     }
-    return result;
+
+    // 验证时间范围
+    let validTimeRange: number | null = null;
+    if (parsed.timeRange !== null && typeof parsed.timeRange === 'number' && parsed.timeRange > 0) {
+      validTimeRange = parsed.timeRange;
+    }
+
+    // 验证和清理关键词
+    const validKeywords: string[] = [];
+    if (Array.isArray(parsed.keywords)) {
+      for (const keyword of parsed.keywords) {
+        if (typeof keyword === 'string' && keyword.trim()) {
+          const trimmed = keyword.trim();
+          if (!validKeywords.includes(trimmed)) {
+            validKeywords.push(trimmed);
+          }
+        }
+      }
+    }
+
+    return {
+      categories: validCategories,
+      timeRange: validTimeRange,
+      keywords: validKeywords,
+    };
   } catch (error) {
     console.error('Error classifying categories with LLM:', error);
-    return [];
+    // 解析失败时抛出错误，由调用方处理兜底逻辑
+    throw error;
   }
 }
 

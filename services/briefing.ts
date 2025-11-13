@@ -257,7 +257,9 @@ function mapRowToTranslatedItem(row: HotspotRow): TranslatedItem | null {
 
 export function getTranslatedHotspotsByCategories(
   categories: string[] = [],
-  limit: number = 60
+  limit: number = 30,
+  timeRange?: number | null,
+  keywords?: string[]
 ): TranslatedItem[] {
   const sanitizedCategories = Array.from(
     new Set(
@@ -267,16 +269,43 @@ export function getTranslatedHotspotsByCategories(
     )
   );
 
-  let query = `SELECT id, source_type, content, processed_content, category, created_at FROM hotspots`;
+  const sanitizedKeywords = Array.from(
+    new Set(
+      (keywords || [])
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
+
+  let query = `SELECT id, source_type, content, processed_content, category, created_at FROM hotspots WHERE 1=1`;
   const params: any[] = [];
 
-  if (sanitizedCategories.length > 0) {
-    const placeholders = sanitizedCategories.map(() => '?').join(',');
-    query += ` WHERE category IN (${placeholders})`;
-    params.push(...sanitizedCategories);
+  // 时间范围过滤
+  if (timeRange !== null && timeRange !== undefined && timeRange > 0) {
+    // SQLite datetime 函数：datetime('now', '-' || N || ' days')
+    // 直接拼接数字到查询字符串中（timeRange 已经验证为正整数）
+    query += ` AND created_at >= datetime('now', '-' || ${timeRange} || ' days')`;
   }
 
-  query += ` ORDER BY created_at DESC LIMIT ?`;
+  // 关键词搜索（多关键词 OR 逻辑）
+  if (sanitizedKeywords.length > 0) {
+    const keywordConditions: string[] = [];
+    for (const keyword of sanitizedKeywords) {
+      keywordConditions.push(`(content LIKE ? OR processed_content LIKE ?)`);
+      const searchPattern = `%${keyword}%`;
+      params.push(searchPattern, searchPattern);
+    }
+    query += ` AND (${keywordConditions.join(' OR ')})`;
+  }
+
+  // 排序逻辑：如果提供了分类，匹配分类的优先；否则按时间排序
+  if (sanitizedCategories.length > 0) {
+    const placeholders = sanitizedCategories.map(() => '?').join(',');
+    query += ` ORDER BY CASE WHEN category IN (${placeholders}) THEN 0 ELSE 1 END, created_at DESC LIMIT ?`;
+    params.push(...sanitizedCategories);
+  } else {
+    query += ` ORDER BY created_at DESC LIMIT ?`;
+  }
   params.push(Math.max(1, limit));
 
   const stmt = db.prepare(query);

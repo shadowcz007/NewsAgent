@@ -73,12 +73,12 @@ export function ChatSection() {
 
   return (
     <div className="flex flex-col h-full border rounded-lg bg-card">
-      <div className="flex items-center gap-2 p-4 border-b">
+      <div className="flex items-center gap-2 p-4 border-b flex-shrink-0">
         <MessageCircle className="h-5 w-5" />
         <h2 className="text-xl font-semibold">Chat with AI Assistant</h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
         {messages.length === 0 && (
           <div className="text-center text-muted-foreground py-8">
             Start a conversation with the AI assistant
@@ -102,7 +102,9 @@ export function ChatSection() {
         <div ref={messagesEndRef} />
       </div>
 
-      <ChatInput onSend={handleSend} disabled={isLoading} />
+      <div className="flex-shrink-0">
+        <ChatInput onSend={handleSend} disabled={isLoading} />
+      </div>
     </div>
   );
 }

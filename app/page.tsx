@@ -21,7 +21,7 @@ export default function Home() {
           <div className="overflow-y-auto pr-4">
             <BriefingSection searchQuery={searchQuery} category={category} />
           </div>
-          <div className="h-full">
+          <div className="h-full flex flex-col min-h-0">
             <ChatSection />
           </div>
         </div>
