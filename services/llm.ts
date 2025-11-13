@@ -135,6 +135,91 @@ async function callSiliconFlow(
   }
 }
 
+// 流式调用硅基流动 API
+export async function* callSiliconFlowStream(
+  messages: Array<{ role: string; content: string }>,
+  model: string = SILICONFLOW_MODEL
+): AsyncGenerator<string, void, unknown> {
+  try {
+    const response = await axios.post(
+      SILICONFLOW_API_URL,
+      {
+        model: model,
+        messages,
+        stream: true,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${SILICONFLOW_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        responseType: 'stream',
+      }
+    );
+
+    const stream = response.data;
+    let buffer = '';
+
+    // 将Node.js流转换为异步迭代器
+    for await (const chunk of stream) {
+      buffer += chunk.toString('utf8');
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmedLine = line.trim();
+        if (trimmedLine === '') continue;
+        
+        if (trimmedLine.startsWith('data: ')) {
+          const dataStr = trimmedLine.slice(6).trim();
+          if (dataStr === '[DONE]') {
+            return;
+          }
+          if (dataStr === '') continue;
+          
+          try {
+            const data = JSON.parse(dataStr);
+            if (data.choices && data.choices[0] && data.choices[0].delta) {
+              const content = data.choices[0].delta.content;
+              if (content) {
+                yield content;
+              }
+            }
+          } catch (e) {
+            // 忽略解析错误，继续处理下一行
+            console.error('Error parsing SSE data:', e, 'Data:', dataStr);
+          }
+        }
+      }
+    }
+
+    // 处理剩余的buffer
+    if (buffer.trim()) {
+      const trimmedBuffer = buffer.trim();
+      if (trimmedBuffer.startsWith('data: ')) {
+        const dataStr = trimmedBuffer.slice(6).trim();
+        if (dataStr !== '[DONE]' && dataStr !== '') {
+          try {
+            const data = JSON.parse(dataStr);
+            if (data.choices && data.choices[0] && data.choices[0].delta) {
+              const content = data.choices[0].delta.content;
+              if (content) {
+                yield content;
+              }
+            }
+          } catch (e) {
+            // 忽略解析错误
+            console.error('Error parsing final buffer:', e);
+          }
+        }
+      }
+    }
+  } catch (error: any) {
+    console.error('Error calling SiliconFlow API stream:', error);
+    throw new Error(`LLM API stream error: ${error.message}`);
+  }
+}
+
 /**
  * 辅助函数：修复常见的 JSON 格式问题
  * 处理尾随逗号、未转义字符、中文标点等常见错误
@@ -720,6 +805,65 @@ export async function generateBriefing(
       briefing: `今日共收集 ${items.length} 条热点资讯，涵盖多个领域。`,
       sources: items.map(item => item.source_url),
     };
+  }
+}
+
+// 流式生成个性化简报
+export async function* generateBriefingStream(
+  items: TranslatedItem[],
+  customRequirement?: string
+): AsyncGenerator<{ type: 'content' | 'done'; text?: string; sources?: string[] }, void, unknown> {
+  if (items.length === 0) {
+    yield { type: 'content', text: '暂无热点资讯' };
+    yield { type: 'done', sources: [] };
+    return;
+  }
+
+  // 构建输入内容
+  const inputContent = JSON.stringify(items, null, 2);
+
+  const userPrompt = customRequirement 
+    ? `用户要求：${customRequirement}\n\n资讯条目：\n${inputContent}`
+    : `资讯条目：\n${inputContent}`;
+
+  const messages = [
+    { role: 'system', content: BRIEFING_PROMPT },
+    { role: 'user', content: userPrompt },
+  ];
+
+  try {
+    let fullResponse = '';
+    
+    // 流式获取响应
+    for await (const chunk of callSiliconFlowStream(messages, LLM_MODEL_BRIEFING)) {
+      fullResponse += chunk;
+      yield { type: 'content', text: chunk };
+    }
+
+    // 解析两段格式提取来源
+    const parts = fullResponse.split('\n\n');
+    const sources: string[] = [];
+    if (parts.length > 1) {
+      const sourceLines = parts[1].split('\n');
+      for (const line of sourceLines) {
+        const url = line.trim();
+        if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+          sources.push(url);
+        }
+      }
+    }
+
+    // 如果没有提取到sources，使用所有items的source_url作为后备
+    if (sources.length === 0) {
+      sources.push(...items.map(item => item.source_url));
+    }
+
+    yield { type: 'done', sources };
+  } catch (error: any) {
+    console.error('Error in generateBriefingStream:', error);
+    // 返回错误信息
+    yield { type: 'content', text: `今日共收集 ${items.length} 条热点资讯，涵盖多个领域。` };
+    yield { type: 'done', sources: items.map(item => item.source_url) };
   }
 }
 
