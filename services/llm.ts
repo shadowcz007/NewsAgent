@@ -242,10 +242,10 @@ function replaceCJKPunctuation(text: string): string {
         case '】': result += ']'; break;  // 中文右方括号 → 英文右方括号
         case '｛': result += '{'; break;  // 全角左花括号 → 英文左花括号
         case '｝': result += '}'; break;  // 全角右花括号 → 英文右花括号
-        case '"': result += '"'; break;  // 中文左双引号 → 英文双引号
-        case '"': result += '"'; break;  // 中文右双引号 → 英文双引号
-        case ''': result += "'"; break;  // 中文左单引号 → 英文单引号
-        case ''': result += "'"; break;  // 中文右单引号 → 英文单引号
+        case '“': result += '"'; break;  // 中文左双引号 → 英文双引号
+        case '”': result += '"'; break;  // 中文右双引号 → 英文双引号
+        case "‘": result += "'"; break;  // 中文左单引号 → 英文单引号
+        case '’': result += "'"; break;  // 中文右单引号 → 英文单引号
         default: result += char; break;
       }
     } else {
