@@ -56,7 +56,14 @@ const TRANSLATE_CATEGORIZE_PROMPT = `你是一个专业的信息处理助手，�
   * **前沿研究**：指基于学术论文、实验发现或科学突破的成果，旨在解决基础科学或工程难题，通常发表于学术平台或权威媒体。
   * **科技行业动态**：指关于科技公司战略、市场趋势、融资、政策、重大合作或产业生态变化的新闻。
   * **其他**：无法明确归入以上四类的条目。
-3. **结构化输出**：严格输出一个 JSON 对象数组，每个对象包含且仅包含以下三个键：\`"translated_title"\`、\`"source_url"\`、\`"category"\`。**不要**包含任何额外的解释、说明、Markdown 格式或注释。`;
+3. **结构化输出**：严格输出一个标准 JSON 数组，遵循以下规则：
+  * 必须使用标准英文标点符号：逗号 (,)、冒号 (:)、引号 (")
+  * **严禁**使用任何中文标点符号：、，：""''（）【】等
+  * 每个对象包含且仅包含三个键：\`"translated_title"\`、\`"source_url"\`、\`"category"\`
+  * 所有字符串值必须用双引号包裹，不能包含未转义的换行符或特殊字符
+  * **不要**添加任何解释、说明、Markdown 代码块标记（如 \`\`\`json）或注释
+  * 直接输出纯 JSON 数组，格式示例：
+    [{"translated_title":"标题","source_url":"https://...","category":"技术工具"}]`;
 
 // 个性化输出简报的 System Prompt
 const BRIEFING_PROMPT = `你是一个敏锐的 AI 创业观察者，以「创业者日记」的口吻处理输入的资讯条目列表（每个条目含 \`"translated_title"\`、\`"source_url"\`、\`"category"\`）。  
@@ -123,9 +130,13 @@ async function callSiliconFlow(
 
 /**
  * 辅助函数：修复常见的 JSON 格式问题
- * 处理尾随逗号、未转义字符等常见错误
+ * 处理尾随逗号、未转义字符、中文标点等常见错误
  */
 function fixCommonJsonIssues(jsonStr: string): string {
+  // 0. 先修复中文标点符号（在 JSON 结构外的）
+  // 这一步要在状态机处理之前完成，避免字符串内的中文标点被误改
+  jsonStr = replaceCJKPunctuation(jsonStr);
+  
   // 1. 移除尾随逗号（在数组或对象最后一个元素后）
   jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
   
@@ -181,26 +192,125 @@ function fixCommonJsonIssues(jsonStr: string): string {
   // 3. 移除 BOM 和其他不可见字符
   result = result.replace(/^\uFEFF/, '');
   
+  // 4. 修复缺失的对象间逗号（两个连续的 } 后跟 {）
+  result = result.replace(/}(\s*){/g, '},\n{');
+  
   return result;
 }
 
 /**
+ * 辅助函数：替换中文标点符号为英文标点
+ * 仅在 JSON 结构位置（非字符串值内）替换
+ */
+function replaceCJKPunctuation(text: string): string {
+  // 使用状态机方式，只在非字符串区域替换中文标点
+  let result = '';
+  let inString = false;
+  let escapeNext = false;
+  
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    
+    if (escapeNext) {
+      result += char;
+      escapeNext = false;
+      continue;
+    }
+    
+    if (char === '\\' && inString) {
+      escapeNext = true;
+      result += char;
+      continue;
+    }
+    
+    if (char === '"') {
+      inString = !inString;
+      result += char;
+      continue;
+    }
+    
+    // 在非字符串区域，替换中文标点
+    if (!inString) {
+      switch (char) {
+        case '，': result += ','; break;  // 中文逗号 → 英文逗号
+        case '、': result += ','; break;  // 中文顿号 → 英文逗号
+        case '：': result += ':'; break;  // 中文冒号 → 英文冒号
+        case '；': result += ';'; break;  // 中文分号 → 英文分号
+        case '（': result += '('; break;  // 中文左括号 → 英文左括号
+        case '）': result += ')'; break;  // 中文右括号 → 英文右括号
+        case '【': result += '['; break;  // 中文左方括号 → 英文左方括号
+        case '】': result += ']'; break;  // 中文右方括号 → 英文右方括号
+        case '｛': result += '{'; break;  // 全角左花括号 → 英文左花括号
+        case '｝': result += '}'; break;  // 全角右花括号 → 英文右花括号
+        case '"': result += '"'; break;  // 中文左双引号 → 英文双引号
+        case '"': result += '"'; break;  // 中文右双引号 → 英文双引号
+        case ''': result += "'"; break;  // 中文左单引号 → 英文单引号
+        case ''': result += "'"; break;  // 中文右单引号 → 英文单引号
+        default: result += char; break;
+      }
+    } else {
+      result += char;
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * 辅助函数：提取 JSON 解析错误的详细信息
+ */
+function extractParseErrorDetails(error: any, processedString: string): string {
+  let details = '';
+  
+  // 错误类型
+  details += `\n  错误类型: ${error.name || 'Unknown'}`;
+  
+  // 错误信息
+  details += `\n  错误信息: ${error.message || 'No message'}`;
+  
+  // 如果是语法错误，尝试提取错误位置
+  if (error instanceof SyntaxError) {
+    // 尝试从错误信息中提取位置
+    const positionMatch = error.message.match(/position (\d+)/i);
+    if (positionMatch) {
+      const pos = parseInt(positionMatch[1]);
+      const start = Math.max(0, pos - 50);
+      const end = Math.min(processedString.length, pos + 50);
+      const snippet = processedString.substring(start, end);
+      details += `\n  错误位置: ${pos}`;
+      details += `\n  错误片段: ...${snippet}...`;
+    } else {
+      // 如果无法从错误信息中提取位置，显示前 100 个字符
+      const snippet = processedString.substring(0, 100);
+      details += `\n  处理后字符串前100字符: ${snippet}${processedString.length > 100 ? '...' : ''}`;
+    }
+  } else {
+    // 非语法错误，显示处理后字符串的摘要
+    const snippet = processedString.substring(0, 100);
+    details += `\n  处理后字符串前100字符: ${snippet}${processedString.length > 100 ? '...' : ''}`;
+  }
+  
+  return details;
+}
+
+/**
  * 辅助函数：多策略 JSON 解析
- * 依次尝试 5 种不同的解析策略，提高成功率
+ * 依次尝试 10 种不同的解析策略，提高成功率
  */
 function parseJsonResponse(response: string, batchNumber: number): TranslatedItem[] {
-  const strategies = [
+  // 每个策略返回 [处理后的字符串, 解析结果] 元组，用于错误诊断
+  const strategies: Array<() => [string, any]> = [
     // 策略 1: 直接解析
     () => {
       console.log(`第 ${batchNumber} 批：尝试策略 1 - 直接解析`);
-      return JSON.parse(response);
+      return [response, JSON.parse(response)];
     },
     
     // 策略 2: 移除 markdown 代码块后解析
     () => {
       console.log(`第 ${batchNumber} 批：尝试策略 2 - 移除 markdown 代码块`);
       const cleaned = response.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-      return JSON.parse(cleaned);
+      return [cleaned, JSON.parse(cleaned)];
     },
     
     // 策略 3: 使用正则提取 JSON 并修复常见问题
@@ -227,7 +337,7 @@ function parseJsonResponse(response: string, batchNumber: number): TranslatedIte
       
       // 修复常见问题
       jsonStr = fixCommonJsonIssues(jsonStr);
-      return JSON.parse(jsonStr);
+      return [jsonStr, JSON.parse(jsonStr)];
     },
     
     // 策略 4: 逐行清理后解析
@@ -243,7 +353,7 @@ function parseJsonResponse(response: string, batchNumber: number): TranslatedIte
       });
       const cleaned = jsonLines.join('\n').trim();
       const fixed = fixCommonJsonIssues(cleaned);
-      return JSON.parse(fixed);
+      return [fixed, JSON.parse(fixed)];
     },
     
     // 策略 5: 提取最大的 JSON 结构
@@ -252,6 +362,7 @@ function parseJsonResponse(response: string, batchNumber: number): TranslatedIte
       // 查找所有可能的 JSON 数组
       const arrayMatches = response.matchAll(/\[[\s\S]*?\]/g);
       let longestMatch = '';
+      let longestFixed = '';
       
       for (const match of arrayMatches) {
         if (match[0].length > longestMatch.length) {
@@ -259,6 +370,7 @@ function parseJsonResponse(response: string, batchNumber: number): TranslatedIte
             const fixed = fixCommonJsonIssues(match[0]);
             JSON.parse(fixed); // 测试是否有效
             longestMatch = match[0];
+            longestFixed = fixed;
           } catch (e) {
             // 继续尝试下一个
           }
@@ -266,19 +378,162 @@ function parseJsonResponse(response: string, batchNumber: number): TranslatedIte
       }
       
       if (longestMatch) {
-        const fixed = fixCommonJsonIssues(longestMatch);
-        return JSON.parse(fixed);
+        return [longestFixed, JSON.parse(longestFixed)];
       }
       
       throw new Error('No valid JSON array found');
+    },
+    
+    // 策略 6: 中文标点修复后解析
+    () => {
+      console.log(`第 ${batchNumber} 批：尝试策略 6 - 中文标点修复后解析`);
+      let cleaned = response.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      
+      // 提取 JSON 结构
+      const startArray = cleaned.indexOf('[');
+      const endArray = cleaned.lastIndexOf(']');
+      if (startArray !== -1 && endArray !== -1) {
+        cleaned = cleaned.substring(startArray, endArray + 1);
+      }
+      
+      // 应用中文标点修复和其他修复
+      const fixed = fixCommonJsonIssues(cleaned);
+      return [fixed, JSON.parse(fixed)];
+    },
+    
+    // 策略 7: 贪婪数组提取（使用贪婪模式）
+    () => {
+      console.log(`第 ${batchNumber} 批：尝试策略 7 - 贪婪数组提取`);
+      // 使用贪婪模式匹配最长的数组结构
+      const greedyMatch = response.match(/\[[\s\S]*\]/);
+      if (!greedyMatch) {
+        throw new Error('No array structure found with greedy match');
+      }
+      
+      const fixed = fixCommonJsonIssues(greedyMatch[0]);
+      return [fixed, JSON.parse(fixed)];
+    },
+    
+    // 策略 8: 逐对象容错解析
+    () => {
+      console.log(`第 ${batchNumber} 批：尝试策略 8 - 逐对象容错解析`);
+      // 使用正则匹配所有可能的对象
+      const objectPattern = /\{[^{}]*"translated_title"[^{}]*"source_url"[^{}]*"category"[^{}]*\}/g;
+      const objectMatches = response.match(objectPattern);
+      
+      if (!objectMatches || objectMatches.length === 0) {
+        throw new Error('No valid objects found');
+      }
+      
+      const parsedObjects: TranslatedItem[] = [];
+      let processedArray = '[';
+      for (const objStr of objectMatches) {
+        try {
+          const fixed = fixCommonJsonIssues(objStr);
+          const parsed = JSON.parse(fixed);
+          if (parsed.translated_title && parsed.source_url && parsed.category) {
+            parsedObjects.push(parsed);
+            processedArray += fixed + ',';
+          }
+        } catch (e) {
+          // 跳过损坏的对象，继续处理下一个
+          console.log(`第 ${batchNumber} 批：策略 8 - 跳过一个损坏的对象`);
+        }
+      }
+      processedArray = processedArray.slice(0, -1) + ']'; // 移除最后的逗号并关闭数组
+      
+      if (parsedObjects.length === 0) {
+        throw new Error('No valid objects could be parsed');
+      }
+      
+      return [processedArray, parsedObjects];
+    },
+    
+    // 策略 9: 字段级重建
+    () => {
+      console.log(`第 ${batchNumber} 批：尝试策略 9 - 字段级重建`);
+      // 使用正则提取所有字段
+      const titlePattern = /"translated_title"\s*:\s*"([^"]+)"/g;
+      const urlPattern = /"source_url"\s*:\s*"([^"]+)"/g;
+      const categoryPattern = /"category"\s*:\s*"([^"]+)"/g;
+      
+      const titles = Array.from(response.matchAll(titlePattern), m => m[1]);
+      const urls = Array.from(response.matchAll(urlPattern), m => m[1]);
+      const categories = Array.from(response.matchAll(categoryPattern), m => m[1]);
+      
+      if (titles.length === 0 || urls.length === 0 || categories.length === 0) {
+        throw new Error('Could not extract required fields');
+      }
+      
+      // 取最小长度，确保所有对象都有完整字段
+      const minLength = Math.min(titles.length, urls.length, categories.length);
+      const reconstructed: TranslatedItem[] = [];
+      
+      for (let i = 0; i < minLength; i++) {
+        reconstructed.push({
+          translated_title: titles[i],
+          source_url: urls[i],
+          category: categories[i] as TranslatedItem['category'],
+        });
+      }
+      
+      if (reconstructed.length === 0) {
+        throw new Error('Could not reconstruct any objects');
+      }
+      
+      const processedStr = JSON.stringify(reconstructed);
+      return [processedStr, reconstructed];
+    },
+    
+    // 策略 10: 增强字段级重建（处理多行字段值）
+    () => {
+      console.log(`第 ${batchNumber} 批：尝试策略 10 - 增强字段级重建`);
+      // 处理可能跨行的字段值
+      const titlePattern = /"translated_title"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/g;
+      const urlPattern = /"source_url"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/g;
+      const categoryPattern = /"category"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/g;
+      
+      const titles = Array.from(response.matchAll(titlePattern), m => m[1]);
+      const urls = Array.from(response.matchAll(urlPattern), m => m[1]);
+      const categories = Array.from(response.matchAll(categoryPattern), m => m[1]);
+      
+      if (titles.length === 0 && urls.length === 0) {
+        throw new Error('Could not extract any fields');
+      }
+      
+      // 尝试按对象分组重建
+      const reconstructed: TranslatedItem[] = [];
+      const minLength = Math.min(titles.length, urls.length, categories.length);
+      
+      for (let i = 0; i < minLength; i++) {
+        // 验证 URL 是否有效
+        if (urls[i] && (urls[i].startsWith('http://') || urls[i].startsWith('https://'))) {
+          reconstructed.push({
+            translated_title: titles[i] || '未命名',
+            source_url: urls[i],
+            category: (categories[i] as TranslatedItem['category']) || '其他',
+          });
+        }
+      }
+      
+      if (reconstructed.length === 0) {
+        throw new Error('Could not reconstruct any valid objects');
+      }
+      
+      const processedStr = JSON.stringify(reconstructed);
+      return [processedStr, reconstructed];
     },
   ];
   
   // 依次尝试每个策略
   let lastError: any = null;
+  let lastProcessedString: string = '';
+  
   for (let i = 0; i < strategies.length; i++) {
     try {
-      const result = strategies[i]();
+      const [processedString, result] = strategies[i]();
+      lastProcessedString = processedString;
+      
       console.log(`第 ${batchNumber} 批：策略 ${i + 1} 成功解析`);
       
       // 验证结果是数组
@@ -289,11 +544,30 @@ function parseJsonResponse(response: string, batchNumber: number): TranslatedIte
       return result as TranslatedItem[];
     } catch (error: any) {
       lastError = error;
-      console.log(`第 ${batchNumber} 批：策略 ${i + 1} 失败: ${error.message}`);
+      
+      // 增强的诊断日志
+      console.log(`第 ${batchNumber} 批：策略 ${i + 1} 失败`);
+      
+      // 如果有处理后的字符串，提取详细错误信息
+      if (lastProcessedString) {
+        const errorDetails = extractParseErrorDetails(error, lastProcessedString);
+        console.log(errorDetails);
+      } else {
+        // 没有处理后的字符串，直接显示错误信息
+        console.log(`  错误类型: ${error.name || 'Unknown'}`);
+        console.log(`  错误信息: ${error.message || 'No message'}`);
+      }
+      
+      // 重置处理字符串，准备下一个策略
+      lastProcessedString = '';
     }
   }
   
-  // 所有策略都失败
+  // 所有策略都失败，输出详细诊断信息
+  console.log(`\n第 ${batchNumber} 批：所有 ${strategies.length} 个策略均失败`);
+  console.log(`原始响应长度: ${response.length} 字符`);
+  console.log(`原始响应前 300 字符:\n${response.substring(0, 300)}${response.length > 300 ? '...' : ''}`);
+  
   throw new Error(`所有解析策略都失败。最后错误: ${lastError?.message || 'Unknown'}`);
 }
 
