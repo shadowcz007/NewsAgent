@@ -417,9 +417,12 @@ function parseJsonResponse(response: string, batchNumber: number): TranslatedIte
     // 策略 8: 逐对象容错解析
     () => {
       console.log(`第 ${batchNumber} 批：尝试策略 8 - 逐对象容错解析`);
-      // 使用正则匹配所有可能的对象
-      const objectPattern = /\{[^{}]*"translated_title"[^{}]*"source_url"[^{}]*"category"[^{}]*\}/g;
-      const objectMatches = response.match(objectPattern);
+      // 先修复中文标点，然后使用正则匹配所有可能的对象（包括跨行）
+      const cleaned = fixCommonJsonIssues(response);
+      
+      // 使用更宽松的正则匹配对象，允许跨行和更多空白字符
+      const objectPattern = /\{[\s\S]*?"translated_title"[\s\S]*?"source_url"[\s\S]*?"category"[\s\S]*?\}/g;
+      const objectMatches = cleaned.match(objectPattern);
       
       if (!objectMatches || objectMatches.length === 0) {
         throw new Error('No valid objects found');
@@ -429,23 +432,24 @@ function parseJsonResponse(response: string, batchNumber: number): TranslatedIte
       let processedArray = '[';
       for (const objStr of objectMatches) {
         try {
-          const fixed = fixCommonJsonIssues(objStr);
-          const parsed = JSON.parse(fixed);
+          // 对于每个对象，再做一次清理（移除对象内多余的空白行）
+          const cleanedObj = objStr.replace(/\n\s*\n/g, '\n');
+          const parsed = JSON.parse(cleanedObj);
           if (parsed.translated_title && parsed.source_url && parsed.category) {
             parsedObjects.push(parsed);
-            processedArray += fixed + ',';
+            processedArray += cleanedObj + ',';
           }
         } catch (e) {
           // 跳过损坏的对象，继续处理下一个
-          console.log(`第 ${batchNumber} 批：策略 8 - 跳过一个损坏的对象`);
+          console.log(`第 ${batchNumber} 批：策略 8 - 跳过一个损坏的对象: ${(e as Error).message}`);
         }
       }
-      processedArray = processedArray.slice(0, -1) + ']'; // 移除最后的逗号并关闭数组
       
       if (parsedObjects.length === 0) {
         throw new Error('No valid objects could be parsed');
       }
       
+      processedArray = processedArray.slice(0, -1) + ']'; // 移除最后的逗号并关闭数组
       return [processedArray, parsedObjects];
     },
     
