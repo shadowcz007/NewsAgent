@@ -67,7 +67,7 @@ Database: better-sqlite3
 ---
 # 热点获取
 
-包括 新闻头条、60s新闻、HackerNews、百炼智能体、Rss、
+包括 新闻头条、60s新闻、HackerNews、Rss、
 
 <新闻头条>
 curl -k -i "http://v.juhe.cn/toutiao/index?key=key&type=top&page=20&page_size=&is_filter="
@@ -151,22 +151,6 @@ async function main() {
 // 运行脚本
 main();
 ```
-
-<百炼智能体> 
-curl -X POST https://dashscope.aliyuncs.com/api/v1/apps/YOUR_APP_ID/completion \
---header "Authorization: Bearer $DASHSCOPE_API_KEY" \
---header 'Content-Type: application/json' \
---data '{
-    "input": {
-        "prompt": "你是谁？"
-    },
-    "parameters":  {},
-    "debug": {}
-}' 
-
-应用ID：9e2f319c1c694005b15488123933ddd0
-DASHSCOPE_API_KEY：sk-93bfcb1243ae4361ac8ae788ed1042aa
-<百炼智能体/> 
 
 <Rss>
 订阅源：
