@@ -55,7 +55,7 @@ export function ChatSection() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, stream: true }),
       });
 
       if (!response.ok) {
