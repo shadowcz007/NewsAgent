@@ -5,7 +5,8 @@ import {
   SILICONFLOW_MODEL,
   LLM_MODEL_CLASSIFY,
   LLM_MODEL_TRANSLATE,
-  LLM_MODEL_BRIEFING
+  LLM_MODEL_BRIEFING,
+  LLM_MODEL_TITLE
 } from '@/lib/constants';
 import { HotspotItem } from './hotspot';
 import { DifyRetrievalResult } from './dify';
@@ -1259,6 +1260,74 @@ export async function classifyCategoriesFromInput(
     console.error('Error classifying categories with LLM:', error);
     // 解析失败时抛出错误，由调用方处理兜底逻辑
     throw error;
+  }
+}
+
+/**
+ * 生成收藏标题（10字以内）
+ * 如果 LLM 调用失败，使用降级方案：取前15字
+ */
+export async function generateTitle(content: string): Promise<string> {
+  if (!content || !content.trim()) {
+    // 降级方案：取前15字
+    return content.slice(0, 15).trim();
+  }
+
+  const systemPrompt = `你是一个标题生成助手。你的任务是根据提供的简报内容，生成一个简洁、准确的标题。
+
+**要求**：
+1. 标题必须在10个字以内（包括标点符号）
+2. 标题应该准确概括简报的核心内容
+3. 标题应该简洁明了，避免冗余
+4. 只返回标题文本，不要添加任何解释或额外文字
+
+**示例**：
+- 内容："人工智能技术在医疗领域的应用正在快速发展..."
+- 标题："AI医疗应用进展"
+
+- 内容："最新研究显示，量子计算取得重大突破..."
+- 标题："量子计算新突破"
+
+直接返回标题，不要输出其他内容。`;
+
+  const userPrompt = `请为以下简报内容生成一个10字以内的标题：
+
+${content.trim()}`;
+
+  try {
+    const response = await callSiliconFlow(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      0,
+      3,
+      LLM_MODEL_TITLE
+    );
+
+    // 清理响应：移除可能的引号、换行等
+    let title = response.trim();
+    title = title.replace(/^["']|["']$/g, ''); // 移除首尾引号
+    title = title.replace(/\n/g, ''); // 移除换行
+    title = title.trim();
+
+    // 验证长度：如果超过10字，截取前10字
+    if (title.length > 10) {
+      title = title.slice(0, 10).trim();
+    }
+
+    // 如果标题为空或太短，使用降级方案
+    if (!title || title.length < 2) {
+      throw new Error('Generated title is too short');
+    }
+
+    return title;
+  } catch (error) {
+    console.error('Error generating title with LLM:', error);
+    // 降级方案：取前15字
+    const parts = content.split('\n\n');
+    const firstPart = parts[0] || content;
+    return firstPart.slice(0, 15).trim();
   }
 }
 

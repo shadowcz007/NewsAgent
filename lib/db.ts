@@ -146,6 +146,59 @@ export function initDatabase() {
     console.error('Error initializing categories:', error);
   }
 
+  // 收藏表
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS favorites (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      content_hash TEXT UNIQUE NOT NULL,
+      content TEXT NOT NULL,
+      sources TEXT,
+      title TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  // 检查并添加 title 字段（迁移逻辑）
+  try {
+    const tableInfo = db.prepare(`PRAGMA table_info(favorites)`).all() as Array<{ name: string; type: string }>;
+    const hasTitleField = tableInfo.some(col => col.name === 'title');
+    
+    if (!hasTitleField) {
+      // 添加 title 字段
+      db.exec(`ALTER TABLE favorites ADD COLUMN title TEXT`);
+    }
+  } catch (error) {
+    console.error('Error migrating title field:', error);
+  }
+
+  // 用户同步配置表
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_sync_configs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER UNIQUE NOT NULL,
+      notion_token TEXT,
+      notion_data_source_id TEXT,
+      feishu_token TEXT,
+      feishu_folder_token TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Notion 同步记录表
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notion_sync_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      favorite_id INTEGER UNIQUE NOT NULL,
+      notion_page_id TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (favorite_id) REFERENCES favorites(id) ON DELETE CASCADE
+    )
+  `);
+
   // 创建索引
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
@@ -158,6 +211,8 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_briefings_created_at ON briefings(created_at);
     CREATE INDEX IF NOT EXISTS idx_cache_expires_at ON cache(expires_at);
     CREATE INDEX IF NOT EXISTS idx_categories_display_order ON categories(display_order);
+    CREATE INDEX IF NOT EXISTS idx_favorites_user_id ON favorites(user_id);
+    CREATE INDEX IF NOT EXISTS idx_favorites_content_hash ON favorites(content_hash);
   `);
 }
 

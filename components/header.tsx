@@ -127,6 +127,9 @@ export function Header({ onSearch, onCategoryChange, currentCategory = "All" }: 
                   <DropdownMenuItem onClick={() => router.push("/dashboard")}>
                     Dashboard
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => router.push("/briefing/history")}>
+                    Briefing History
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => signOut()}>
                     Sign Out
                   </DropdownMenuItem>
