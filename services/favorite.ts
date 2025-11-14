@@ -76,16 +76,16 @@ export function saveFavorite(
 /**
  * 获取用户的收藏列表
  */
-export function getUserFavorites(userId: number, limit: number = 50): Favorite[] {
+export function getUserFavorites(userId: number, limit: number = 50, offset: number = 0): Favorite[] {
   const stmt = db.prepare(`
     SELECT id, user_id, content_hash, content, sources, title, created_at
     FROM favorites
     WHERE user_id = ?
     ORDER BY created_at DESC
-    LIMIT ?
+    LIMIT ? OFFSET ?
   `);
 
-  const rows = stmt.all(userId, limit) as Array<{
+  const rows = stmt.all(userId, limit, offset) as Array<{
     id: number;
     user_id: number;
     content_hash: string;

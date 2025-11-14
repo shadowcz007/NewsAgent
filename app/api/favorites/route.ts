@@ -7,10 +7,11 @@ import { generateTitle } from '@/services/llm';
 export async function GET(request: NextRequest) {
   return withApiKeyAuth(request, async (req, userId) => {
     const { searchParams } = new URL(request.url);
-    const limit = parseInt(searchParams.get('limit') || '50');
+    const limit = parseInt(searchParams.get('limit') || '50', 10);
+    const offset = parseInt(searchParams.get('offset') || '0', 10);
 
     try {
-      const favorites = getUserFavorites(userId, limit);
+      const favorites = getUserFavorites(userId, limit, offset);
       return NextResponse.json(favorites);
     } catch (error: any) {
       console.error('Error getting favorites:', error);

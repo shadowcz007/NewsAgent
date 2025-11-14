@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Header } from "@/components/header";
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 function DashboardContent() {
   const { data: session, status } = useSession();
@@ -20,6 +21,7 @@ function DashboardContent() {
     feishu_folder_token: "",
   });
   const [syncConfigLoading, setSyncConfigLoading] = useState(false);
+  const [showCurlExamples, setShowCurlExamples] = useState(false);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -130,6 +132,66 @@ function DashboardContent() {
                   <Button onClick={generateApiKey} disabled={loading}>
                     {loading ? "Generating..." : "Regenerate API Key"}
                   </Button>
+                  <div className="mt-4 pt-4 border-t">
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowCurlExamples(!showCurlExamples)}
+                      className="w-full flex items-center justify-between"
+                    >
+                      <span>API Usage Examples</span>
+                      {showCurlExamples ? (
+                        <ChevronUp className="h-4 w-4" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      )}
+                    </Button>
+                    {showCurlExamples && (
+                      <div className="mt-4 space-y-4">
+                        <div>
+                          <h4 className="text-sm font-semibold mb-2">Chat API</h4>
+                          <div className="space-y-2">
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">Basic usage:</p>
+                              <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto">
+                                <code>{`curl -X POST ${typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.com'}/api/chat \\
+  -H "Content-Type: application/json" \\
+  -H "x-api-key: ${apiKey}" \\
+  -d '{"message": "今天有什么重要新闻？"}'`}</code>
+                              </pre>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">Streaming response:</p>
+                              <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto">
+                                <code>{`curl -X POST ${typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.com'}/api/chat \\
+  -H "Content-Type: application/json" \\
+  -H "x-api-key: ${apiKey}" \\
+  -d '{"message": "今天有什么重要新闻？", "stream": true}'`}</code>
+                              </pre>
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-semibold mb-2">Favorites API</h4>
+                          <div className="space-y-2">
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">Get all favorites:</p>
+                              <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto">
+                                <code>{`curl -X GET "${typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.com'}/api/favorites?limit=50" \\
+  -H "x-api-key: ${apiKey}"`}</code>
+                              </pre>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">Get favorites with pagination:</p>
+                              <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto">
+                                <code>{`curl -X GET "${typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.com'}/api/favorites?limit=20&offset=0" \\
+  -H "x-api-key: ${apiKey}"`}</code>
+                              </pre>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </>
               ) : (
                 <Button onClick={generateApiKey} disabled={loading}>

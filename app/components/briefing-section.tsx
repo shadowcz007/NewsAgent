@@ -13,6 +13,8 @@ import {
 import { BriefingCard } from "./briefing-card";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 
 interface HotspotItem {
   id: number;
@@ -156,6 +158,12 @@ interface BriefingSectionProps {
   category?: string;
 }
 
+interface Statistics {
+  total: number;
+  today: number;
+  sources: string[];
+}
+
 export function BriefingSection({ searchQuery = "", category = "All" }: BriefingSectionProps) {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [language, setLanguage] = useState("English");
@@ -164,6 +172,8 @@ export function BriefingSection({ searchQuery = "", category = "All" }: Briefing
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [statistics, setStatistics] = useState<Statistics | null>(null);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
   const { data: session } = useSession();
   const router = useRouter();
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -287,6 +297,29 @@ export function BriefingSection({ searchQuery = "", category = "All" }: Briefing
     };
   }, [session, hasMore, isLoadingMore, allHotspots.length]);
 
+  // 获取统计数据（未登录时）
+  useEffect(() => {
+    if (session) return; // 已登录不需要统计数据
+
+    setIsLoadingStats(true);
+    fetch('/api/statistics')
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error('Failed to fetch statistics');
+        }
+        return res.json();
+      })
+      .then((data: Statistics) => {
+        setStatistics(data);
+      })
+      .catch((err) => {
+        console.error('Error fetching statistics:', err);
+      })
+      .finally(() => {
+        setIsLoadingStats(false);
+      });
+  }, [session]);
+
   // 如果未登录，显示欢迎提示
   if (!session) {
     return (
@@ -295,11 +328,55 @@ export function BriefingSection({ searchQuery = "", category = "All" }: Briefing
           <h2 className="text-3xl font-bold">Real-Time Briefings</h2>
         </div>
         <div className="text-center py-16">
-          <div className="max-w-md mx-auto space-y-4">
-            <h3 className="text-2xl font-semibold text-foreground">欢迎使用 Hot Topics AI</h3>
-            <p className="text-muted-foreground">
-              请登录以查看实时新闻摘要和热点话题
-            </p>
+          <div className="max-w-2xl mx-auto space-y-6">
+            <div className="space-y-4">
+              <h3 className="text-2xl font-semibold text-foreground">欢迎使用 Hot Topics AI</h3>
+              <p className="text-muted-foreground">
+                请登录以查看实时新闻摘要和热点话题
+              </p>
+            </div>
+
+            {/* 统计数据 */}
+            {isLoadingStats ? (
+              <div className="text-sm text-muted-foreground">加载统计数据中...</div>
+            ) : statistics ? (
+              <div className="space-y-4">
+                {/* 统计卡片 */}
+                <div className="grid grid-cols-2 gap-4">
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="text-center space-y-1">
+                        <div className="text-2xl font-bold">{statistics.total.toLocaleString()}</div>
+                        <div className="text-sm text-muted-foreground">已爬取热点总数</div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="text-center space-y-1">
+                        <div className="text-2xl font-bold">{statistics.today.toLocaleString()}</div>
+                        <div className="text-sm text-muted-foreground">今日新增</div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* 数据源标签 */}
+                {statistics.sources.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium text-foreground">数据来源</div>
+                    <div className="flex flex-wrap gap-2 justify-center">
+                      {statistics.sources.map((source) => (
+                        <Badge key={source} variant="outline" className="text-xs">
+                          {source}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
             <Button onClick={() => router.push("/auth/login")} className="mt-4">
               登录
             </Button>
