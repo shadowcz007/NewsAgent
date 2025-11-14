@@ -121,14 +121,14 @@ const groupByDate = (items: HotspotItem[]): GroupedHotspots[] => {
   
   items.forEach((item) => {
     // 调试：打印原始日期字符串
-    if (process.env.NODE_ENV === 'development') {
-      console.log('Raw createdAt:', item.createdAt, 'Item ID:', item.id);
-    }
+    // if (process.env.NODE_ENV === 'development') {
+    //   console.log('Raw createdAt:', item.createdAt, 'Item ID:', item.id);
+    // }
     const date = formatDate(item.createdAt);
     // 调试：打印格式化后的日期
-    if (process.env.NODE_ENV === 'development') {
-      console.log('Formatted date:', date);
-    }
+    // if (process.env.NODE_ENV === 'development') {
+    //   console.log('Formatted date:', date);
+    // }
     if (!grouped[date]) {
       grouped[date] = [];
     }
@@ -144,9 +144,9 @@ const groupByDate = (items: HotspotItem[]): GroupedHotspots[] => {
     }));
   
   // 调试：打印分组结果
-  if (process.env.NODE_ENV === 'development') {
-    console.log('Grouped dates:', result.map(g => ({ date: g.date, count: g.items.length })));
-  }
+  // if (process.env.NODE_ENV === 'development') {
+  //   console.log('Grouped dates:', result.map(g => ({ date: g.date, count: g.items.length })));
+  // }
   
   return result;
 };
