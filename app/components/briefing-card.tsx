@@ -68,7 +68,7 @@ export function BriefingCard({
         )}
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Globe className="h-4 w-4" />
-          <span>Source: {source}</span>
+          <span>{source}</span>
         </div>
       </CardContent>
     </Card>

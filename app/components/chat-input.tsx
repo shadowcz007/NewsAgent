@@ -29,9 +29,9 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
 
   return (
     <div className="flex items-center gap-2 p-4 border-t">
-      <Button variant="ghost" size="icon" className="flex-shrink-0">
+      {/* <Button variant="ghost" size="icon" className="flex-shrink-0">
         <Mic className="h-4 w-4" />
-      </Button>
+      </Button> */}
       <Input
         type="text"
         placeholder="Type your message..."
@@ -52,7 +52,3 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
     </div>
   );
 }
-
-
-
-

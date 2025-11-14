@@ -77,7 +77,9 @@ export function Header({ onSearch, onCategoryChange, currentCategory = "All" }: 
           onClick={handleLogoClick}
         >
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <span className="text-lg font-bold">Hot AI</span>
+            <span className="font-bold" style={{
+              fontSize:10
+            }}>Hot AI</span>
           </div>
           <span className="text-xl font-semibold">Hot Topics AI</span>
         </div>
