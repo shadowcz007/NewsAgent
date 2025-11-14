@@ -177,7 +177,8 @@ export function getAllCategories(): Array<{
 export function getHotspotsFromDatabase(
   category?: string,
   search?: string,
-  limit: number = 100
+  limit: number = 100,
+  offset: number = 0
 ): Array<{
   id: number;
   source_type: string;
@@ -202,8 +203,8 @@ export function getHotspotsFromDatabase(
     params.push(searchPattern, searchPattern);
   }
 
-  query += ` ORDER BY created_at DESC LIMIT ?`;
-  params.push(limit);
+  query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+  params.push(limit, offset);
 
   const stmt = db.prepare(query);
   return stmt.all(...params) as Array<{

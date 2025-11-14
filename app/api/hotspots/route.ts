@@ -11,19 +11,23 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get('search') || '';
     const category = searchParams.get('category') || '';
+    const limit = parseInt(searchParams.get('limit') || '36', 10);
+    const offset = parseInt(searchParams.get('offset') || '0', 10);
 
-    // 尝试从缓存获取
-    const cacheKey = `hotspots:${search}:${category}`;
-    const cached = await getCache(cacheKey);
-    if (cached) {
-      return NextResponse.json(cached);
-    }
+    // 尝试从缓存获取（分页时不使用缓存，因为缓存键不包含分页信息）
+    // 如果需要缓存分页结果，可以修改缓存键包含 limit 和 offset
+    // const cacheKey = `hotspots:${search}:${category}:${limit}:${offset}`;
+    // const cached = await getCache(cacheKey);
+    // if (cached) {
+    //   return NextResponse.json(cached);
+    // }
 
     // 从数据库查询热点（支持分类和搜索过滤）
     const dbHotspots = getHotspotsFromDatabase(
       category || undefined,
       search || undefined,
-      100
+      limit,
+      offset
     );
 
     // 解析并格式化返回数据
@@ -82,8 +86,9 @@ export async function GET(request: NextRequest) {
       };
     }).filter(item => item !== null);
 
-    // 缓存结果
-    await setCache(cacheKey, result, CACHE_TTL.HOTSPOTS);
+    // 分页时不缓存结果，因为缓存键不包含分页信息
+    // 如果需要缓存分页结果，可以修改缓存键包含 limit 和 offset
+    // await setCache(cacheKey, result, CACHE_TTL.HOTSPOTS);
 
     return NextResponse.json(result);
   });

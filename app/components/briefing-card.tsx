@@ -25,8 +25,20 @@ export function BriefingCard({
 }: BriefingCardProps) {
   const categoryColor = CATEGORY_COLORS[category] || "gray";
 
+  const handleClick = () => {
+    if (url) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   return (
-    <Card className="hover:shadow-lg transition-shadow">
+    <Card 
+      className={cn(
+        "hover:shadow-lg transition-shadow",
+        url && "cursor-pointer"
+      )}
+      onClick={handleClick}
+    >
       <CardHeader>
         <div className="flex items-center justify-between">
           <Badge
