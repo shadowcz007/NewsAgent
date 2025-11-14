@@ -81,22 +81,40 @@ const BRIEFING_PROMPT = `你是一个敏锐的 AI 创业观察者，以「创业
 2. **用户要求**（如有）：用户的具体需求或关注点。
 3. **资讯条目**：需要处理的资讯列表。
 
-**默认行为（用户未提供额外要求时）**：  
-- 用不超过 140 字提炼所有条目的**共同洞察**，而非罗列事实。  
-- 聚焦三件事：**谁在解决什么真问题？为何此刻重要？隐含何种范式转移？**  
-- 优先捕捉具备**自然语言界面、氛围编程（Vibe Coding）或 AI Agent 协作潜力**的信号。  
-- 语气带判断、有情绪，像你真的会记在备忘录里的那句话。  
-- 如果提供了历史知识，可以结合历史背景来增强洞察的深度和相关性。
+**核心任务**：
+- 深入分析资讯条目，提炼**共同洞察**而非简单罗列事实
+- 聚焦三个关键问题：**谁在解决什么真问题？为何此刻重要？隐含何种范式转移？**
+- 优先捕捉具备**自然语言界面、氛围编程（Vibe Coding）或 AI Agent 协作潜力**的信号
+- 语气带判断、有情绪，像你真的会记在备忘录里的那句话
 
-**若用户提供了自定义要求**：  
-- 严格按用户要求处理输入的资讯条目列表，生成 140 字内简报，仍保持精炼、洞察导向、拒绝泛泛而谈。  
-- 如果提供了历史知识，应结合历史背景来满足用户的具体需求。
+**历史知识利用**：
+- 如果提供了历史知识，必须结合历史背景来增强洞察的深度和相关性
+- 在第二段中，清晰说明历史知识与当前资讯的关联，展现时间维度的思考
+- 避免简单复述历史知识，而是提炼其与当前资讯的对比、延续或转折关系
 
-**输出格式固定为两段**：  
-1. **第一段**：140 字内的日记体简报（含情绪与判断）。  
-2. **第二段**：来源清单，列出140字日记体简报所提及的条目的 \`source_url\`，每行一个**来源url**。  
+**用户要求响应**：
+- 若用户提供了自定义要求，严格按用户要求处理，但仍保持精炼、洞察导向、拒绝泛泛而谈
+- 结合历史知识来满足用户的具体需求，提供更有针对性的分析
 
-永远不解释、不总结格式、不添加额外文本。`;
+**输出格式固定为三段（用两个换行符 \`\\n\\n\` 分隔）**：  
+1. **第一段**：140 字内的日记体简报（含情绪与判断）。聚焦洞察，回答"谁在解决什么真问题？为何此刻重要？隐含何种范式转移？"
+2. **第二段**：历史知识关联分析（如有历史知识输入）。说明历史背景与当前资讯的关联、对比或延续关系，展现时间维度的思考。如果没有历史知识输入，此段可为空或省略。
+3. **第三段**：来源清单，列出第一段简报所提及的条目的 \`source_url\`，每行一个**来源url**（仅URL，不要其他文字）。
+
+**格式要求**：
+- 三段之间必须用两个换行符（\`\\n\\n\`）分隔
+- 第一段不超过 140 字，保持精炼
+- 第二段如有内容，应简洁有力，不超过 100 字
+- 第三段只包含URL，每行一个，不要添加任何说明文字
+- 永远不解释、不总结格式、不添加额外文本
+
+**示例格式**：
+这是今日的洞察：XXX正在解决YYY问题，这很重要因为ZZZ，暗示了WWW的范式转移。
+
+回顾笔记，我们发现AAA与当前趋势形成对比/延续，说明BBB。
+
+https://example.com/article1
+https://example.com/article2`;
 
 // 调用硅基流动 API（带重试机制）
 async function callSiliconFlow(
@@ -805,13 +823,35 @@ export async function generateBriefing(
   try {
     const response = await callSiliconFlow(messages, 0, 3, LLM_MODEL_BRIEFING);
     
-    // 解析两段格式
+    // 解析三段格式：第一段（简报）+ 第二段（历史知识）+ 第三段（来源）
     const parts = response.split('\n\n');
-    const briefing = parts[0] || response;
     
-    // 提取来源 URL
+    // briefing 字段 = 第一段 + 第二段（合并）
+    let briefing = '';
+    if (parts.length >= 1) {
+      briefing = parts[0].trim();
+    }
+    if (parts.length >= 2 && parts[1].trim()) {
+      // 如果第二段存在且不为空，合并到briefing中
+      briefing = briefing ? `${briefing}\n\n${parts[1].trim()}` : parts[1].trim();
+    }
+    // 如果没有解析到任何内容，使用完整响应作为后备
+    if (!briefing) {
+      briefing = response.trim();
+    }
+    
+    // 提取来源 URL（从第三段）
     const sources: string[] = [];
-    if (parts.length > 1) {
+    if (parts.length >= 3) {
+      const sourceLines = parts[2].split('\n');
+      for (const line of sourceLines) {
+        const url = line.trim();
+        if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+          sources.push(url);
+        }
+      }
+    } else if (parts.length === 2) {
+      // 兼容旧格式：如果只有两段，第二段可能是来源
       const sourceLines = parts[1].split('\n');
       for (const line of sourceLines) {
         const url = line.trim();
@@ -834,6 +874,16 @@ export async function generateBriefing(
       sources: fallbackSources,
     };
   }
+}
+
+/**
+ * 辅助函数：确保换行符正确传递（用于 Markdown 渲染）
+ * 将字面量 \n 转换为真正的换行符
+ */
+function normalizeNewlines(text: string): string {
+  // 如果文本中包含转义的换行符（\\n），将其转换为真正的换行符
+  // 但要注意，JSON.stringify 已经处理了转义，所以这里主要是处理边界情况
+  return text.replace(/\\n/g, '\n');
 }
 
 // 流式生成个性化简报
@@ -878,50 +928,100 @@ export async function* generateBriefingStream(
   try {
     let fullResponse = '';
     let outputBuffer = '';
-    let foundSeparator = false;
+    let firstSeparatorFound = false; // 第一段结束标记
+    let secondSeparatorFound = false; // 第二段结束标记（第三段开始）
     
     // 流式获取响应
     for await (const chunk of callSiliconFlowStream(messages, LLM_MODEL_BRIEFING)) {
       fullResponse += chunk;
       
-      // 如果已经找到分隔符，不再输出内容，只收集用于提取 sources
-      if (foundSeparator) {
+      // 如果已经找到第二个分隔符（第三段开始），不再输出内容，只收集用于提取 sources
+      if (secondSeparatorFound) {
         continue;
       }
       
       // 将 chunk 添加到 buffer
       outputBuffer += chunk;
       
-      // 检测是否遇到两个连续换行符（第一段和第二段的分隔符）
-      const separatorIndex = outputBuffer.indexOf('\n\n');
-      if (separatorIndex !== -1) {
-        // 找到分隔符，只输出第一段内容
-        const firstParagraph = outputBuffer.substring(0, separatorIndex);
-        if (firstParagraph) {
-          yield { type: 'content', text: firstParagraph };
+      // 检测第一个分隔符（第一段和第二段的分隔符）
+      if (!firstSeparatorFound) {
+        const firstSeparatorIndex = outputBuffer.indexOf('\n\n');
+        if (firstSeparatorIndex !== -1) {
+          // 找到第一个分隔符，输出第一段内容
+          const firstParagraph = outputBuffer.substring(0, firstSeparatorIndex);
+          if (firstParagraph) {
+            yield { type: 'content', text: normalizeNewlines(firstParagraph) };
+          }
+          // 移除第一段和分隔符，保留第二段内容
+          outputBuffer = outputBuffer.substring(firstSeparatorIndex + 2);
+          firstSeparatorFound = true;
+          // 如果 buffer 中还有第二段的内容，立即输出（添加 \n\n 前缀）
+          if (outputBuffer) {
+            yield { type: 'content', text: normalizeNewlines('\n\n' + outputBuffer) };
+            outputBuffer = '';
+          }
+        } else if (outputBuffer.length > 3) {
+          // 还没找到第一个分隔符，但 buffer 已经足够长，可以安全输出前面的部分
+          // 保留最后 3 个字符在 buffer 中（防止 \n\n 跨 chunk）
+          const safeToOutput = outputBuffer.substring(0, outputBuffer.length - 3);
+          if (safeToOutput) {
+            yield { type: 'content', text: normalizeNewlines(safeToOutput) };
+          }
+          outputBuffer = outputBuffer.slice(-3);
         }
-        foundSeparator = true;
-        outputBuffer = '';
-      } else if (outputBuffer.length > 3) {
-        // 还没找到分隔符，但 buffer 已经足够长，可以安全输出前面的部分
-        // 保留最后 3 个字符在 buffer 中（防止 \n\n 跨 chunk）
-        const safeToOutput = outputBuffer.substring(0, outputBuffer.length - 3);
-        if (safeToOutput) {
-          yield { type: 'content', text: safeToOutput };
+      } else {
+        // 已经找到第一个分隔符，直接输出第二段内容（原始响应，直到找到第二个分隔符）
+        const secondSeparatorIndex = outputBuffer.indexOf('\n\n');
+        if (secondSeparatorIndex !== -1) {
+          // 找到第二个分隔符，输出第二段的剩余内容
+          const secondParagraph = outputBuffer.substring(0, secondSeparatorIndex);
+          if (secondParagraph) {
+            yield { type: 'content', text: normalizeNewlines(secondParagraph) };
+          }
+          // 移除第二段和分隔符，第三段内容不输出
+          outputBuffer = outputBuffer.substring(secondSeparatorIndex + 2);
+          secondSeparatorFound = true;
+        } else {
+          // 还没找到第二个分隔符，直接输出所有内容（第二段内容）
+          if (outputBuffer.length > 3) {
+            // 保留最后 3 个字符在 buffer 中（防止 \n\n 跨 chunk）
+            const safeToOutput = outputBuffer.substring(0, outputBuffer.length - 3);
+            if (safeToOutput) {
+              yield { type: 'content', text: normalizeNewlines(safeToOutput) };
+            }
+            outputBuffer = outputBuffer.slice(-3);
+          }
+          // buffer 长度 <= 3 时，不输出，保留在 buffer 中等待更多内容或分隔符
         }
-        outputBuffer = outputBuffer.slice(-3);
       }
     }
     
-    // 流结束，如果还有 buffer 中的内容且没找到分隔符，输出剩余内容
-    if (!foundSeparator && outputBuffer) {
-      yield { type: 'content', text: outputBuffer };
+    // 流结束，处理剩余 buffer 内容
+    if (!secondSeparatorFound && outputBuffer) {
+      if (firstSeparatorFound) {
+        // 第二段还没结束，输出剩余内容
+        yield { type: 'content', text: normalizeNewlines(outputBuffer) };
+      } else {
+        // 第一段还没结束，直接输出
+        yield { type: 'content', text: normalizeNewlines(outputBuffer) };
+      }
     }
 
-    // 解析两段格式提取来源
+    // 解析三段格式提取来源（从第三段）
     const parts = fullResponse.split('\n\n');
     const sources: string[] = [];
-    if (parts.length > 1) {
+    
+    if (parts.length >= 3) {
+      // 标准三段格式：从第三段提取来源
+      const sourceLines = parts[2].split('\n');
+      for (const line of sourceLines) {
+        const url = line.trim();
+        if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+          sources.push(url);
+        }
+      }
+    } else if (parts.length === 2) {
+      // 兼容旧格式：如果只有两段，第二段可能是来源
       const sourceLines = parts[1].split('\n');
       for (const line of sourceLines) {
         const url = line.trim();
