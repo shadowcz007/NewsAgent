@@ -3,6 +3,7 @@ import { translateAndCategorize, generateBriefing, TranslatedItem } from './llm'
 import { getCache, setCache } from './cache';
 import { CACHE_TTL } from '@/lib/constants';
 import db from '@/lib/db';
+import { retrieveKnowledge } from './dify';
 
 type HotspotRow = {
   id: number;
@@ -55,8 +56,13 @@ export async function generateBriefingWithCache(
   // 翻译和分类
   const translatedItems = await translateAndCategorize(hotspots);
 
+  // 检索历史知识（如果有用户要求）
+  const historicalKnowledge = customRequirement 
+    ? await retrieveKnowledge(customRequirement, 2)
+    : [];
+
   // 生成简报
-  const { briefing, sources } = await generateBriefing(translatedItems, customRequirement);
+  const { briefing, sources } = await generateBriefing(translatedItems, customRequirement, historicalKnowledge);
 
   const result: BriefingResult = {
     briefing,

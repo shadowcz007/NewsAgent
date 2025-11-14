@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withApiKeyAuth } from '@/lib/middleware';
 import { classifyCategoriesFromInput, generateBriefingStream, generateBriefing, ClassificationResult } from '@/services/llm';
 import { getAllCategories, getTranslatedHotspotsByCategories } from '@/services/briefing';
+import { retrieveKnowledge } from '@/services/dify';
 
 // 聊天接口（个性化查询）- 支持流式和非流式输出
 export async function POST(request: NextRequest) {
@@ -17,35 +18,58 @@ export async function POST(request: NextRequest) {
       const categoryRecords = getAllCategories();
       const availableCategoryNames = categoryRecords.map((item) => item.name);
     
-      let classificationResult: ClassificationResult;
-      try {
-        classificationResult = await classifyCategoriesFromInput(message, availableCategoryNames);
-      } catch (classificationError) {
-        console.error('Failed to classify categories for chat request:', classificationError);
-        // 兜底逻辑：查询最近1天的新信息，不限制分类
-        classificationResult = {
-          categories: [],
-          timeRange: 1,
-          keywords: [],
-        };
-      }
+      // 并发执行：分类和知识检索同时进行
+      const [classificationResult, historicalKnowledge] = await Promise.allSettled([
+        classifyCategoriesFromInput(message, availableCategoryNames).catch((error) => {
+          console.error('Failed to classify categories for chat request:', error);
+          // 兜底逻辑：查询最近1天的新信息，不限制分类
+          return {
+            categories: [],
+            timeRange: 1,
+            keywords: [],
+          } as ClassificationResult;
+        }),
+        retrieveKnowledge(message, 2).catch((error) => {
+          console.error('Failed to retrieve knowledge from Dify:', error);
+          // 容错：返回空数组，不影响简报生成
+          return [];
+        }),
+      ]);
+
+      // 处理分类结果
+      const finalClassificationResult: ClassificationResult = 
+        classificationResult.status === 'fulfilled' 
+          ? classificationResult.value 
+          : {
+              categories: [],
+              timeRange: 1,
+              keywords: [],
+            };
+
+      // 处理知识检索结果
+      const finalHistoricalKnowledge = 
+        historicalKnowledge.status === 'fulfilled' 
+          ? historicalKnowledge.value 
+          : [];
 
       // 如果分类为空，使用所有分类
-      const selectedCategories = classificationResult.categories.length > 0 
-        ? classificationResult.categories 
+      const selectedCategories = finalClassificationResult.categories.length > 0 
+        ? finalClassificationResult.categories 
         : [];
 
       console.log('Classification result:', {
         categories: selectedCategories,
-        timeRange: classificationResult.timeRange,
-        keywords: classificationResult.keywords,
+        timeRange: finalClassificationResult.timeRange,
+        keywords: finalClassificationResult.keywords,
       });
+
+      console.log('Historical knowledge retrieved:', finalHistoricalKnowledge.length, 'items');
 
       const translatedItems = getTranslatedHotspotsByCategories(
         selectedCategories,
         30,
-        classificationResult.timeRange,
-        classificationResult.keywords
+        finalClassificationResult.timeRange,
+        finalClassificationResult.keywords
       );
 
       console.log('translatedItems count:', translatedItems.length);
@@ -68,8 +92,8 @@ export async function POST(request: NextRequest) {
                 type: 'done',
                 sources: [],
                 categories: selectedCategories,
-                timeRange: classificationResult.timeRange,
-                keywords: classificationResult.keywords,
+                timeRange: finalClassificationResult.timeRange,
+                keywords: finalClassificationResult.keywords,
               });
               controller.enqueue(encoder.encode(`data: ${doneData}\n\n`));
               controller.close();
@@ -91,8 +115,8 @@ export async function POST(request: NextRequest) {
             const encoder = new TextEncoder();
             
             try {
-              // 流式生成简报
-              for await (const chunk of generateBriefingStream(translatedItems, message)) {
+              // 流式生成简报（传入历史知识）
+              for await (const chunk of generateBriefingStream(translatedItems, message, finalHistoricalKnowledge)) {
                 if (chunk.type === 'content' && chunk.text) {
                   const data = JSON.stringify({
                     type: 'content',
@@ -104,8 +128,8 @@ export async function POST(request: NextRequest) {
                     type: 'done',
                     sources: chunk.sources || [],
                     categories: selectedCategories,
-                    timeRange: classificationResult.timeRange,
-                    keywords: classificationResult.keywords,
+                    timeRange: finalClassificationResult.timeRange,
+                    keywords: finalClassificationResult.keywords,
                   });
                   controller.enqueue(encoder.encode(`data: ${data}\n\n`));
                   controller.close();
@@ -138,20 +162,20 @@ export async function POST(request: NextRequest) {
             briefing: '暂时没有匹配该需求的热点内容，请稍后再试。',
             sources: [],
             categories: selectedCategories,
-            timeRange: classificationResult.timeRange,
-            keywords: classificationResult.keywords,
+            timeRange: finalClassificationResult.timeRange,
+            keywords: finalClassificationResult.keywords,
           });
         }
 
-        // 非流式生成简报
-        const { briefing, sources } = await generateBriefing(translatedItems, message);
+        // 非流式生成简报（传入历史知识）
+        const { briefing, sources } = await generateBriefing(translatedItems, message, finalHistoricalKnowledge);
         
         return NextResponse.json({
           briefing,
           sources,
           categories: selectedCategories,
-          timeRange: classificationResult.timeRange,
-          keywords: classificationResult.keywords,
+          timeRange: finalClassificationResult.timeRange,
+          keywords: finalClassificationResult.keywords,
         });
       }
     } catch (error: any) {

@@ -69,6 +69,10 @@ LLM_MODEL_BRIEFING=deepseek-ai/DeepSeek-V3
 
 # 聚合数据 API（可选，已有默认值）
 JUHE_API_KEY=85a3fd3xxxa41a78453eeeed
+
+# Dify 知识库 API（可选，已有默认值）
+DIFY_DATASET_ID=0593f5a9-d08d-4e1d-b432-5f39ae252e05
+DIFY_API_KEY=dataset-kQrj2zG3jiMJfRKqu2rYCVzn
 ```
 
 ## 安装和启动
@@ -125,9 +129,8 @@ npm start
 ### API 端点
 
 - `GET /api/hotspots` - 获取热点列表
-- `POST /api/briefing/generate` - 生成简报
 - `GET /api/briefing/history` - 获取简报历史
-- `POST /api/chat` - AI 聊天接口
+- `POST /api/chat` - AI 聊天接口（支持生成个性化简报）
 - `GET /api/user/api-key` - 获取 API Key
 - `POST /api/user/api-key` - 生成新 API Key
 

@@ -48,6 +48,11 @@ export const LLM_MODEL_CLASSIFY = process.env.LLM_MODEL_CLASSIFY || "Qwen/Qwen2.
 export const LLM_MODEL_TRANSLATE = process.env.LLM_MODEL_TRANSLATE || "deepseek-ai/DeepSeek-V3";
 export const LLM_MODEL_BRIEFING = process.env.LLM_MODEL_BRIEFING || "deepseek-ai/DeepSeek-V3";
 
+// Dify API 配置
+export const DIFY_DATASET_ID = process.env.DIFY_DATASET_ID || "0593f5a9-d08d-4e1d-b432-5f39ae252e05";
+export const DIFY_API_KEY = process.env.DIFY_API_KEY || "dataset-kQrj2zG3jiMJfRKqu2rYCVzn";
+export const DIFY_API_URL = "https://api.dify.ai/v1/datasets";
+
 // 热点源类型
 export const HOTSPOT_SOURCES = {
   JUHE_TOUTIAO: "juhe_toutiao",

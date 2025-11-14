@@ -8,6 +8,7 @@ import {
   LLM_MODEL_BRIEFING
 } from '@/lib/constants';
 import { HotspotItem } from './hotspot';
+import { DifyRetrievalResult } from './dify';
 
 // 分类结果数据结构
 export interface ClassificationResult {
@@ -75,14 +76,21 @@ const TRANSLATE_CATEGORIZE_PROMPT = `你是一个专业的信息处理助手，�
 // 个性化输出简报的 System Prompt
 const BRIEFING_PROMPT = `你是一个敏锐的 AI 创业观察者，以「创业者日记」的口吻处理输入的资讯条目列表（每个条目含 \`"translated_title"\`、\`"source_url"\`、\`"category"\`）。  
 
+**输入可能包含以下部分（按顺序）**：
+1. **历史知识/相关背景**（如有）：这是从知识库检索到的相关历史信息，可作为背景参考，帮助你更好地理解当前资讯的上下文和意义。
+2. **用户要求**（如有）：用户的具体需求或关注点。
+3. **资讯条目**：需要处理的资讯列表。
+
 **默认行为（用户未提供额外要求时）**：  
 - 用不超过 140 字提炼所有条目的**共同洞察**，而非罗列事实。  
 - 聚焦三件事：**谁在解决什么真问题？为何此刻重要？隐含何种范式转移？**  
 - 优先捕捉具备**自然语言界面、氛围编程（Vibe Coding）或 AI Agent 协作潜力**的信号。  
 - 语气带判断、有情绪，像你真的会记在备忘录里的那句话。  
+- 如果提供了历史知识，可以结合历史背景来增强洞察的深度和相关性。
 
 **若用户提供了自定义要求**：  
 - 严格按用户要求处理输入的资讯条目列表，生成 140 字内简报，仍保持精炼、洞察导向、拒绝泛泛而谈。  
+- 如果提供了历史知识，应结合历史背景来满足用户的具体需求。
 
 **输出格式固定为两段**：  
 1. **第一段**：140 字内的日记体简报（含情绪与判断）。  
@@ -760,7 +768,8 @@ export async function translateAndCategorize(items: HotspotItem[]): Promise<Tran
 // 生成个性化简报
 export async function generateBriefing(
   items: TranslatedItem[],
-  customRequirement?: string
+  customRequirement?: string,
+  historicalKnowledge?: DifyRetrievalResult[]
 ): Promise<{ briefing: string; sources: string[] }> {
   if (items.length === 0) {
     return { briefing: '暂无热点资讯', sources: [] };
@@ -769,9 +778,24 @@ export async function generateBriefing(
   // 构建输入内容
   const inputContent = JSON.stringify(items, null, 2);
 
-  const userPrompt = customRequirement 
-    ? `用户要求：${customRequirement}\n\n资讯条目：\n${inputContent}`
-    : `资讯条目：\n${inputContent}`;
+  // 构建用户提示，按顺序：历史知识 → 用户要求 → 资讯条目
+  let userPrompt = '';
+  
+  // 添加历史知识部分（如果有）
+  if (historicalKnowledge && historicalKnowledge.length > 0) {
+    const knowledgeText = historicalKnowledge
+      .map((item, index) => `${index + 1}. ${item.content}`)
+      .join('\n\n');
+    userPrompt += `历史知识/相关背景：\n${knowledgeText}\n\n`;
+  }
+
+  // 添加用户要求（如果有）
+  if (customRequirement) {
+    userPrompt += `用户要求：${customRequirement}\n\n`;
+  }
+
+  // 添加资讯条目
+  userPrompt += `资讯条目：\n${inputContent}`;
 
   const messages = [
     { role: 'system', content: BRIEFING_PROMPT },
@@ -815,7 +839,8 @@ export async function generateBriefing(
 // 流式生成个性化简报
 export async function* generateBriefingStream(
   items: TranslatedItem[],
-  customRequirement?: string
+  customRequirement?: string,
+  historicalKnowledge?: DifyRetrievalResult[]
 ): AsyncGenerator<{ type: 'content' | 'done'; text?: string; sources?: string[] }, void, unknown> {
   if (items.length === 0) {
     yield { type: 'content', text: '暂无热点资讯' };
@@ -826,9 +851,24 @@ export async function* generateBriefingStream(
   // 构建输入内容
   const inputContent = JSON.stringify(items, null, 2);
 
-  const userPrompt = customRequirement 
-    ? `用户要求：${customRequirement}\n\n资讯条目：\n${inputContent}`
-    : `资讯条目：\n${inputContent}`;
+  // 构建用户提示，按顺序：历史知识 → 用户要求 → 资讯条目
+  let userPrompt = '';
+  
+  // 添加历史知识部分（如果有）
+  if (historicalKnowledge && historicalKnowledge.length > 0) {
+    const knowledgeText = historicalKnowledge
+      .map((item, index) => `${index + 1}. ${item.content}`)
+      .join('\n\n');
+    userPrompt += `历史知识/相关背景：\n${knowledgeText}\n\n`;
+  }
+
+  // 添加用户要求（如果有）
+  if (customRequirement) {
+    userPrompt += `用户要求：${customRequirement}\n\n`;
+  }
+
+  // 添加资讯条目
+  userPrompt += `资讯条目：\n${inputContent}`;
 
   const messages = [
     { role: 'system', content: BRIEFING_PROMPT },
