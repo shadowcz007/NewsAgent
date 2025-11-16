@@ -217,6 +217,53 @@ export function getHotspotsFromDatabase(
   }>;
 }
 
+// 提取核心关键词（使用简单规则）
+function extractCoreKeywords(keywords: string[]): string[] {
+  if (!keywords || keywords.length === 0) {
+    return [];
+  }
+
+  // 常见停用词（中英文）
+  const stopWords = new Set([
+    'ai', 'api', 'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'by', 'for',
+    '的', '了', '是', '在', '和', '与', '或', '及', '等', '等', '相关', '关于'
+  ]);
+
+  // 过滤和评分关键词
+  const scoredKeywords = keywords
+    .map(k => k.trim())
+    .filter(k => {
+      // 过滤长度小于2的关键词
+      if (k.length < 2) return false;
+      // 过滤停用词（不区分大小写）
+      if (stopWords.has(k.toLowerCase())) return false;
+      return true;
+    })
+    .map(k => {
+      // 评分：长度适中的关键词得分更高（3-20字符）
+      let score = 0;
+      const len = k.length;
+      if (len >= 3 && len <= 20) {
+        score = 10;
+      } else if (len > 20) {
+        score = 5; // 过长的关键词可能不够精确
+      } else {
+        score = 3; // 较短的关键词
+      }
+      // 中文字符加分（通常更有意义）
+      if (/[\u4e00-\u9fa5]/.test(k)) {
+        score += 2;
+      }
+      return { keyword: k, score };
+    })
+    .sort((a, b) => b.score - a.score) // 按分数降序排序
+    .map(item => item.keyword);
+
+  // 去重并保留前8个核心关键词
+  const uniqueKeywords = Array.from(new Set(scoredKeywords));
+  return uniqueKeywords.slice(0, 8);
+}
+
 function mapRowToTranslatedItem(row: HotspotRow): TranslatedItem | null {
   let parsedContent: HotspotItem | null = null;
   if (row.content) {
@@ -333,6 +380,90 @@ export function getTranslatedHotspotsByCategories(
     results.push(item);
   }
 
+  return results;
+}
+
+// 带降级策略的查询函数
+export function getTranslatedHotspotsWithFallback(
+  categories: string[] = [],
+  limit: number = 30,
+  timeRange?: number | null,
+  keywords?: string[]
+): TranslatedItem[] {
+  const MIN_RESULTS_THRESHOLD = 3;
+  const TIME_RANGE_FALLBACKS = [3, 7, 30];
+
+  // 1. 先使用原始条件查询
+  let results = getTranslatedHotspotsByCategories(categories, limit, timeRange, keywords);
+  console.log(`[Fallback] 原始查询: timeRange=${timeRange}, keywords=${keywords?.length || 0}, 结果=${results.length}`);
+
+  // 如果结果数量足够，直接返回
+  if (results.length >= MIN_RESULTS_THRESHOLD) {
+    return results;
+  }
+
+  // 2. 如果结果不足，逐步放宽时间范围
+  if (timeRange !== null && timeRange !== undefined && timeRange > 0) {
+    const originalTimeRange = timeRange;
+    for (const fallbackTimeRange of TIME_RANGE_FALLBACKS) {
+      // 只尝试比原始时间范围更大的值
+      if (fallbackTimeRange <= originalTimeRange) {
+        continue;
+      }
+      
+      results = getTranslatedHotspotsByCategories(categories, limit, fallbackTimeRange, keywords);
+      console.log(`[Fallback] 放宽时间范围到 ${fallbackTimeRange} 天: 结果=${results.length}`);
+      
+      if (results.length >= MIN_RESULTS_THRESHOLD) {
+        return results;
+      }
+    }
+  } else {
+    // 如果原始没有时间范围限制，尝试添加时间范围
+    for (const fallbackTimeRange of TIME_RANGE_FALLBACKS) {
+      results = getTranslatedHotspotsByCategories(categories, limit, fallbackTimeRange, keywords);
+      console.log(`[Fallback] 添加时间范围 ${fallbackTimeRange} 天: 结果=${results.length}`);
+      
+      if (results.length >= MIN_RESULTS_THRESHOLD) {
+        return results;
+      }
+    }
+  }
+
+  // 3. 如果放宽时间范围后仍不足，使用核心关键词重试
+  if (keywords && keywords.length > 0) {
+    const coreKeywords = extractCoreKeywords(keywords);
+    console.log(`[Fallback] 提取核心关键词: ${coreKeywords.length} 个 (原始: ${keywords.length} 个)`);
+    
+    if (coreKeywords.length > 0) {
+      // 先尝试原始时间范围 + 核心关键词
+      if (timeRange !== null && timeRange !== undefined && timeRange > 0) {
+        results = getTranslatedHotspotsByCategories(categories, limit, timeRange, coreKeywords);
+        console.log(`[Fallback] 核心关键词 + 原始时间范围 ${timeRange} 天: 结果=${results.length}`);
+        
+        if (results.length >= MIN_RESULTS_THRESHOLD) {
+          return results;
+        }
+      }
+
+      // 再尝试放宽时间范围 + 核心关键词
+      const timeRangesToTry = timeRange !== null && timeRange !== undefined && timeRange > 0
+        ? TIME_RANGE_FALLBACKS.filter(tr => tr > timeRange)
+        : TIME_RANGE_FALLBACKS;
+
+      for (const fallbackTimeRange of timeRangesToTry) {
+        results = getTranslatedHotspotsByCategories(categories, limit, fallbackTimeRange, coreKeywords);
+        console.log(`[Fallback] 核心关键词 + 时间范围 ${fallbackTimeRange} 天: 结果=${results.length}`);
+        
+        if (results.length >= MIN_RESULTS_THRESHOLD) {
+          return results;
+        }
+      }
+    }
+  }
+
+  // 4. 如果所有策略都失败，返回最后一次查询的结果（可能为空）
+  console.log(`[Fallback] 所有降级策略尝试完毕，最终结果=${results.length}`);
   return results;
 }
 

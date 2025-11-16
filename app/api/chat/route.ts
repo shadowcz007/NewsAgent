@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiKeyAuth } from '@/lib/middleware';
 import { classifyCategoriesFromInput, generateBriefingStream, generateBriefing, ClassificationResult } from '@/services/llm';
-import { getAllCategories, getTranslatedHotspotsByCategories } from '@/services/briefing';
+import { getAllCategories, getTranslatedHotspotsWithFallback } from '@/services/briefing';
 import { retrieveKnowledge } from '@/services/dify';
 
 // 聊天接口（个性化查询）- 支持流式和非流式输出
@@ -22,10 +22,10 @@ export async function POST(request: NextRequest) {
       const [classificationResult, historicalKnowledge] = await Promise.allSettled([
         classifyCategoriesFromInput(message, availableCategoryNames).catch((error) => {
           console.error('Failed to classify categories for chat request:', error);
-          // 兜底逻辑：查询最近1天的新信息，不限制分类
+          // 兜底逻辑：查询最近7天的新信息，不限制分类
           return {
             categories: [],
-            timeRange: 1,
+            timeRange: 7,
             keywords: [],
           } as ClassificationResult;
         }),
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
           ? classificationResult.value 
           : {
               categories: [],
-              timeRange: 1,
+              timeRange: 7,
               keywords: [],
             };
 
@@ -65,14 +65,14 @@ export async function POST(request: NextRequest) {
 
       console.log('Historical knowledge retrieved:', finalHistoricalKnowledge.length, 'items');
 
-      const translatedItems = getTranslatedHotspotsByCategories(
+      const translatedItems = getTranslatedHotspotsWithFallback(
         selectedCategories,
         30,
         finalClassificationResult.timeRange,
         finalClassificationResult.keywords
       );
 
-      console.log('translatedItems count:', translatedItems.length);
+      console.log('translatedItems count:', translatedItems.length, '(after fallback strategy)');
 
       // 根据stream参数决定返回格式
       if (stream) {
