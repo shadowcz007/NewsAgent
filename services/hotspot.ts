@@ -60,13 +60,19 @@ export async function fetch60sNews(): Promise<HotspotItem[]> {
     
     if (response.data && response.data.data) {
       const data = response.data.data;
+      // 实际 API 返回的字段：date, news (数组), link, tip, image, cover 等
+      const newsArray = data.news || [];
+      const summary = newsArray.length > 0 
+        ? newsArray.join('\n') 
+        : (data.tip || '');
+      
       return [{
-        title: data.title || '60秒新闻',
-        url: data.url || '',
+        title: `${data.date || '60秒新闻'} - ${newsArray.length}条新闻`,
+        url: data.link || '',
         source: '60s新闻',
         sourceType: HOTSPOT_SOURCES.NEWS_60S,
-        summary: data.content || data.text || '',
-        publishedAt: new Date().toISOString(),
+        summary: summary,
+        publishedAt: data.created ? new Date(data.created_at || data.created).toISOString() : new Date().toISOString(),
         metadata: data,
       }];
     }
