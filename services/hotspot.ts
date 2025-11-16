@@ -54,7 +54,9 @@ export async function fetchJuheToutiao(): Promise<HotspotItem[]> {
 // 获取 60s 新闻
 export async function fetch60sNews(): Promise<HotspotItem[]> {
   try {
-    const response = await axios.get(NEWS_60S_URL);
+    const response = await axios.get(NEWS_60S_URL, {
+      timeout: 15000, // 设置 15 秒超时，避免长时间等待
+    });
     
     if (response.data && response.data.data) {
       const data = response.data.data;
@@ -71,6 +73,12 @@ export async function fetch60sNews(): Promise<HotspotItem[]> {
     return [];
   } catch (error) {
     console.error('Error fetching 60s news:', error);
+    // 如果是超时错误，记录更详细的信息
+    if (axios.isAxiosError(error)) {
+      if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+        console.error('60s news API request timed out');
+      }
+    }
     return [];
   }
 }
