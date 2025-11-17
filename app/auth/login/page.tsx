@@ -74,7 +74,7 @@ export default function LoginPage() {
               {loading ? "Signing in..." : "Sign In"}
             </Button>
             <div className="text-center text-sm">
-              <span className="text-muted-foreground">Don't have an account? </span>
+              <span className="text-muted-foreground">Don&apos;t have an account? </span>
               <a href="/auth/register" className="text-primary hover:underline">
                 Sign up
               </a>
@@ -85,6 +85,7 @@ export default function LoginPage() {
     </div>
   );
 }
+
 
 
 

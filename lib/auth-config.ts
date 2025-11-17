@@ -1,8 +1,8 @@
-import NextAuth, { NextAuthOptions } from "next-auth";
+import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { getUserByEmail, verifyPassword } from "./auth";
 
-export const authOptions: NextAuthOptions = {
+export const authOptions = {
   providers: [
     CredentialsProvider({
       name: "Credentials",
@@ -15,12 +15,15 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
-        const user = await getUserByEmail(credentials.email);
+        const email = credentials.email as string;
+        const password = credentials.password as string;
+
+        const user = await getUserByEmail(email);
         if (!user) {
           return null;
         }
 
-        const isValid = await verifyPassword(credentials.password, user.password);
+        const isValid = await verifyPassword(password, user.password);
         if (!isValid) {
           return null;
         }
