@@ -124,7 +124,7 @@ https://example.com/article2`;
 async function callSiliconFlow(
   messages: Array<{ role: string; content: string }>,
   retryCount: number = 0,
-  maxRetries: number = 3,
+  maxRetries: number = 5,
   model: string = SILICONFLOW_MODEL
 ): Promise<string> {
   try {
@@ -165,10 +165,12 @@ async function callSiliconFlow(
   }
 }
 
-// 流式调用硅基流动 API
+// 流式调用硅基流动 API（带重试机制）
 export async function* callSiliconFlowStream(
   messages: Array<{ role: string; content: string }>,
-  model: string = SILICONFLOW_MODEL
+  model: string = SILICONFLOW_MODEL,
+  retryCount: number = 0,
+  maxRetries: number = 5
 ): AsyncGenerator<string, void, unknown> {
   try {
     const response = await axios.post(
@@ -245,6 +247,21 @@ export async function* callSiliconFlowStream(
       }
     }
   } catch (error: any) {
+    // 判断是否为可重试的错误
+    if (isRetryableError(error) && retryCount < maxRetries) {
+      const retryDelay = 5000 * Math.pow(2, retryCount); // 指数退避：5s, 10s, 20s
+      console.log(
+        `LLM API 流式调用失败，${retryDelay / 1000}秒后重试 (${retryCount + 1}/${maxRetries}):`,
+        error.response?.status || error.code || error.message
+      );
+      
+      await delay(retryDelay);
+      // 递归重试
+      yield* callSiliconFlowStream(messages, model, retryCount + 1, maxRetries);
+      return;
+    }
+    
+    // 不可重试的错误或已达到最大重试次数
     console.error('Error calling SiliconFlow API stream:', error);
     throw new Error(`LLM API stream error: ${error.message}`);
   }
