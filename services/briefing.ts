@@ -23,9 +23,68 @@ const VALID_TRANSLATED_CATEGORIES: TranslatedItem['category'][] = [
 
 export interface BriefingResult {
   briefing: string;
-  sources: string[];
+  sources: { url: string; title: string; content: string }[];
   items: TranslatedItem[];
   createdAt: string;
+}
+
+// 根据 URL 从数据库查询对应的 title 和 summary
+function getSourceInfoByUrl(url: string): { title: string; content: string } | null {
+  try {
+    // 查询 hotspots 表，在 content JSON 字段中查找匹配的 url
+    // 使用精确匹配 URL（转义特殊字符）
+    const escapedUrl = url.replace(/"/g, '\\"');
+    const urlPattern = `%"url":"${escapedUrl}"%`;
+    
+    const stmt = db.prepare(`
+      SELECT content 
+      FROM hotspots 
+      WHERE content LIKE ? ESCAPE '\\'
+      ORDER BY created_at DESC 
+      LIMIT 1
+    `);
+    
+    const result = stmt.get(urlPattern) as { content: string } | undefined;
+    
+    if (!result) {
+      return null;
+    }
+    
+    // 解析 JSON
+    const hotspotItem = JSON.parse(result.content) as HotspotItem;
+    
+    // 精确匹配 URL（区分大小写）
+    if (!hotspotItem || hotspotItem.url !== url) {
+      return null;
+    }
+    
+    return {
+      title: hotspotItem.title || '',
+      content: hotspotItem.summary || '',
+    };
+  } catch (error) {
+    console.error(`Error querying source info for URL ${url}:`, error);
+    return null;
+  }
+}
+
+// 将 URL 数组转换为 {url, title, content}[] 格式
+export async function enrichSources(urls: string[]): Promise<{ url: string; title: string; content: string }[]> {
+  const enrichedSources: { url: string; title: string; content: string }[] = [];
+  
+  for (const url of urls) {
+    const info = getSourceInfoByUrl(url);
+    if (info) {
+      enrichedSources.push({
+        url,
+        title: info.title,
+        content: info.content,
+      });
+    }
+    // 如果找不到，跳过该 URL（根据用户要求）
+  }
+  
+  return enrichedSources;
 }
 
 // 生成简报（带缓存）
@@ -64,9 +123,12 @@ export async function generateBriefingWithCache(
   // 生成简报
   const { briefing, sources } = await generateBriefing(translatedItems, customRequirement, historicalKnowledge);
 
+  // 将 sources 转换为 [url, title, content][] 格式
+  const enrichedSources = await enrichSources(sources);
+
   const result: BriefingResult = {
     briefing,
-    sources,
+    sources: enrichedSources,
     items: translatedItems,
     createdAt: new Date().toISOString(),
   };

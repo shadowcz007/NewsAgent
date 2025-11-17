@@ -84,7 +84,7 @@ function getTitle(favorite: { title?: string; content: string }): string {
     return favorite.title;
   }
   // 降级方案：取前15字
-  const parts = favorite.content.split('\n\n');
+  const parts = favorite.content.split('---');
   const firstPart = parts[0] || favorite.content;
   return firstPart.slice(0, 15).trim();
 }

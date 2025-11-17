@@ -13,7 +13,7 @@ interface Message {
   message: string;
   isUser: boolean;
   timestamp: string;
-  sources?: string[];
+  sources?: { url: string; title: string; content: string }[];
 }
 
 export function ChatSection() {

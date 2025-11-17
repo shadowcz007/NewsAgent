@@ -10,6 +10,7 @@ import {
 } from '@/lib/constants';
 import { HotspotItem } from './hotspot';
 import { DifyRetrievalResult } from './dify';
+import { enrichSources } from './briefing';
 
 // 分类结果数据结构
 export interface ClassificationResult {
@@ -97,13 +98,13 @@ const BRIEFING_PROMPT = `你是一个敏锐的 AI 创业观察者，以「创业
 - 若用户提供了自定义要求，严格按用户要求处理，但仍保持精炼、洞察导向、拒绝泛泛而谈
 - 结合历史知识来满足用户的具体需求，提供更有针对性的分析
 
-**输出格式固定为三段（用两个换行符 \`\\n\\n\` 分隔）**：  
+**输出格式固定为三段（用 \`---\` 分隔）**：  
 1. **第一段**：140 字内的日记体简报（含情绪与判断）。聚焦洞察，回答"谁在解决什么真问题？为何此刻重要？隐含何种范式转移？"
 2. **第二段**：历史知识关联分析（如有历史知识输入）。说明历史背景与当前资讯的关联、对比或延续关系，展现时间维度的思考。如果没有历史知识输入，此段可为空或省略。
 3. **第三段**：来源清单，列出第一段简报所提及的条目的 \`source_url\`，每行一个**来源url**（仅URL，不要其他文字）。
 
 **格式要求**：
-- 三段之间必须用两个换行符（\`\\n\\n\`）分隔
+- 三段之间必须用 \`---\` 分隔
 - 第一段不超过 140 字，保持精炼
 - 第二段如有内容，应简洁有力，不超过 100 字
 - 第三段只包含URL，每行一个，不要添加任何说明文字
@@ -111,9 +112,9 @@ const BRIEFING_PROMPT = `你是一个敏锐的 AI 创业观察者，以「创业
 
 **示例格式**：
 这是今日的洞察：XXX正在解决YYY问题，这很重要因为ZZZ，暗示了WWW的范式转移。
-
+---
 回顾笔记，我们发现AAA与当前趋势形成对比/延续，说明BBB。
-
+---
 https://example.com/article1
 https://example.com/article2`;
 
@@ -825,7 +826,7 @@ export async function generateBriefing(
     const response = await callSiliconFlow(messages, 0, 3, LLM_MODEL_BRIEFING);
     
     // 解析三段格式：第一段（简报）+ 第二段（历史知识）+ 第三段（来源）
-    const parts = response.split('\n\n');
+    const parts = response.split('---');
     
     // briefing 字段 = 第一段 + 第二段（合并）
     let briefing = '';
@@ -892,7 +893,7 @@ export async function* generateBriefingStream(
   items: TranslatedItem[],
   customRequirement?: string,
   historicalKnowledge?: DifyRetrievalResult[]
-): AsyncGenerator<{ type: 'content' | 'done'; text?: string; sources?: string[] }, void, unknown> {
+): AsyncGenerator<{ type: 'content' | 'done'; text?: string; sources?: { url: string; title: string; content: string }[] }, void, unknown> {
   if (items.length === 0) {
     yield { type: 'content', text: '暂无热点资讯' };
     yield { type: 'done', sources: [] };
@@ -946,7 +947,7 @@ export async function* generateBriefingStream(
       
       // 检测第一个分隔符（第一段和第二段的分隔符）
       if (!firstSeparatorFound) {
-        const firstSeparatorIndex = outputBuffer.indexOf('\n\n');
+        const firstSeparatorIndex = outputBuffer.indexOf('---');
         if (firstSeparatorIndex !== -1) {
           // 找到第一个分隔符，输出第一段内容
           const firstParagraph = outputBuffer.substring(0, firstSeparatorIndex);
@@ -954,25 +955,25 @@ export async function* generateBriefingStream(
             yield { type: 'content', text: normalizeNewlines(firstParagraph) };
           }
           // 移除第一段和分隔符，保留第二段内容
-          outputBuffer = outputBuffer.substring(firstSeparatorIndex + 2);
+          outputBuffer = outputBuffer.substring(firstSeparatorIndex + 3);
           firstSeparatorFound = true;
           // 如果 buffer 中还有第二段的内容，立即输出（添加 \n\n 前缀）
           if (outputBuffer) {
             yield { type: 'content', text: normalizeNewlines('\n\n' + outputBuffer) };
             outputBuffer = '';
           }
-        } else if (outputBuffer.length > 3) {
+        } else if (outputBuffer.length > 4) {
           // 还没找到第一个分隔符，但 buffer 已经足够长，可以安全输出前面的部分
-          // 保留最后 3 个字符在 buffer 中（防止 \n\n 跨 chunk）
-          const safeToOutput = outputBuffer.substring(0, outputBuffer.length - 3);
+          // 保留最后 4 个字符在 buffer 中（防止 --- 跨 chunk）
+          const safeToOutput = outputBuffer.substring(0, outputBuffer.length - 4);
           if (safeToOutput) {
             yield { type: 'content', text: normalizeNewlines(safeToOutput) };
           }
-          outputBuffer = outputBuffer.slice(-3);
+          outputBuffer = outputBuffer.slice(-4);
         }
       } else {
         // 已经找到第一个分隔符，直接输出第二段内容（原始响应，直到找到第二个分隔符）
-        const secondSeparatorIndex = outputBuffer.indexOf('\n\n');
+        const secondSeparatorIndex = outputBuffer.indexOf('---');
         if (secondSeparatorIndex !== -1) {
           // 找到第二个分隔符，输出第二段的剩余内容
           const secondParagraph = outputBuffer.substring(0, secondSeparatorIndex);
@@ -980,19 +981,19 @@ export async function* generateBriefingStream(
             yield { type: 'content', text: normalizeNewlines(secondParagraph) };
           }
           // 移除第二段和分隔符，第三段内容不输出
-          outputBuffer = outputBuffer.substring(secondSeparatorIndex + 2);
+          outputBuffer = outputBuffer.substring(secondSeparatorIndex + 3);
           secondSeparatorFound = true;
         } else {
           // 还没找到第二个分隔符，直接输出所有内容（第二段内容）
-          if (outputBuffer.length > 3) {
-            // 保留最后 3 个字符在 buffer 中（防止 \n\n 跨 chunk）
-            const safeToOutput = outputBuffer.substring(0, outputBuffer.length - 3);
+          if (outputBuffer.length > 4) {
+            // 保留最后 4 个字符在 buffer 中（防止 --- 跨 chunk）
+            const safeToOutput = outputBuffer.substring(0, outputBuffer.length - 4);
             if (safeToOutput) {
               yield { type: 'content', text: normalizeNewlines(safeToOutput) };
             }
-            outputBuffer = outputBuffer.slice(-3);
+            outputBuffer = outputBuffer.slice(-4);
           }
-          // buffer 长度 <= 3 时，不输出，保留在 buffer 中等待更多内容或分隔符
+          // buffer 长度 <= 4 时，不输出，保留在 buffer 中等待更多内容或分隔符
         }
       }
     }
@@ -1009,7 +1010,7 @@ export async function* generateBriefingStream(
     }
 
     // 解析三段格式提取来源（从第三段）
-    const parts = fullResponse.split('\n\n');
+    const parts = fullResponse.split('---');
     const sources: string[] = [];
     
     if (parts.length >= 3) {
@@ -1040,13 +1041,17 @@ export async function* generateBriefingStream(
     // 去重 sources
     const uniqueSources = Array.from(new Set(sources));
 
-    yield { type: 'done', sources: uniqueSources };
+    // 将 sources 转换为 {url, title, content}[] 格式
+    const enrichedSources = await enrichSources(uniqueSources);
+
+    yield { type: 'done', sources: enrichedSources };
   } catch (error: any) {
     console.error('Error in generateBriefingStream:', error);
     // 返回错误信息
     const fallbackSources = Array.from(new Set(items.map(item => item.source_url)));
+    const enrichedFallbackSources = await enrichSources(fallbackSources);
     yield { type: 'content', text: `今日共收集 ${items.length} 条热点资讯，涵盖多个领域。` };
-    yield { type: 'done', sources: fallbackSources };
+    yield { type: 'done', sources: enrichedFallbackSources };
   }
 }
 
@@ -1325,7 +1330,7 @@ ${content.trim()}`;
   } catch (error) {
     console.error('Error generating title with LLM:', error);
     // 降级方案：取前15字
-    const parts = content.split('\n\n');
+    const parts = content.split('---');
     const firstPart = parts[0] || content;
     return firstPart.slice(0, 15).trim();
   }

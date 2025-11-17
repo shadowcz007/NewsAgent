@@ -12,7 +12,7 @@ interface ChatMessageProps {
   message: string;
   isUser: boolean;
   timestamp?: string;
-  sources?: string[];
+  sources?: { url: string; title: string; content: string }[];
 }
 
 export function ChatMessage({ message, isUser, timestamp, sources }: ChatMessageProps) {
@@ -122,17 +122,21 @@ export function ChatMessage({ message, isUser, timestamp, sources }: ChatMessage
           <div className="mt-2 space-y-1">
             <span className="text-xs text-muted-foreground font-semibold">来源：</span>
             <div className="flex flex-wrap gap-2">
-              {sources.map((source, index) => (
-                <a
-                  key={index}
-                  href={source}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-600 hover:text-blue-800 underline break-all"
-                >
-                  {source}
-                </a>
-              ))}
+              {sources.map((source, index) => {
+                const displayText = source.title || source.url;
+                return (
+                  <a
+                    key={index}
+                    href={source.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:text-blue-800 underline break-all"
+                    title={source.url}
+                  >
+                    {displayText}
+                  </a>
+                );
+              })}
             </div>
           </div>
         )}

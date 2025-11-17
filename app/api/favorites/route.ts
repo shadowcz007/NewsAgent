@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         console.error('Error generating title:', error);
         // 继续执行，使用降级方案（在 generateTitle 内部已处理）
-        const parts = content.split('\n\n');
+        const parts = content.split('---');
         const firstPart = parts[0] || content;
         title = firstPart.slice(0, 15).trim();
       }

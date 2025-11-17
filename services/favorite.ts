@@ -6,7 +6,7 @@ export interface Favorite {
   user_id: number;
   content_hash: string;
   content: string;
-  sources: string[];
+  sources: string[] | { url: string; title: string; content: string }[]; // 支持旧格式和新格式
   title?: string;
   created_at: string;
 }
@@ -17,7 +17,7 @@ export interface Favorite {
 export function saveFavorite(
   userId: number,
   content: string,
-  sources: string[],
+  sources: string[] | { url: string; title: string; content: string }[],
   title?: string
 ): Favorite {
   const contentHash = generateContentHash(content);

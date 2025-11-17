@@ -19,7 +19,7 @@ import remarkGfm from "remark-gfm";
 interface FavoriteItem {
   id: number;
   content: string;
-  sources: string[];
+  sources: string[] | { url: string; title: string; content: string }[]; // 支持旧格式和新格式
   title?: string;
   created_at: string;
 }
@@ -182,7 +182,7 @@ function BriefingHistoryContent() {
       return item.title;
     }
     // 降级方案：取前15字
-    const parts = item.content.split('\n\n');
+    const parts = item.content.split('---');
     const firstPart = parts[0] || item.content;
     return firstPart.slice(0, 15).trim();
   };
@@ -285,18 +285,26 @@ function BriefingHistoryContent() {
                     <div className="text-sm text-muted-foreground mb-4">
                       <p className="font-semibold mb-2">Sources:</p>
                       <ul className="list-disc list-inside space-y-1">
-                        {item.sources.slice(0, 3).map((source: string, index: number) => (
-                          <li key={index}>
-                            <a
-                              href={source}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="hover:underline"
-                            >
-                              {source}
-                            </a>
-                          </li>
-                        ))}
+                        {item.sources.slice(0, 3).map((source: string | { url: string; title: string; content: string }, index: number) => {
+                          // 兼容旧格式（string）和新格式（{url, title, content}）
+                          const isNewFormat = typeof source === 'object' && 'url' in source;
+                          const url = isNewFormat ? source.url : source;
+                          const title = isNewFormat ? source.title : undefined;
+                          const displayText = title || url;
+                          return (
+                            <li key={index}>
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="hover:underline"
+                                title={url}
+                              >
+                                {displayText}
+                              </a>
+                            </li>
+                          );
+                        })}
                         {item.sources.length > 3 && (
                           <li className="text-muted-foreground">
                             还有 {item.sources.length - 3} 个来源...
@@ -343,18 +351,26 @@ function BriefingHistoryContent() {
                 <div className="text-sm text-muted-foreground">
                   <p className="font-semibold mb-2">Sources:</p>
                   <ul className="list-disc list-inside space-y-1">
-                    {selectedFavorite.sources.map((source: string, index: number) => (
-                      <li key={index}>
-                        <a
-                          href={source}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:underline"
-                        >
-                          {source}
-                        </a>
-                      </li>
-                    ))}
+                    {selectedFavorite.sources.map((source: string | { url: string; title: string; content: string }, index: number) => {
+                      // 兼容旧格式（string）和新格式（{url, title, content}）
+                      const isNewFormat = typeof source === 'object' && 'url' in source;
+                      const url = isNewFormat ? source.url : source;
+                      const title = isNewFormat ? source.title : undefined;
+                      const displayText = title || url;
+                      return (
+                        <li key={index}>
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:underline"
+                            title={url}
+                          >
+                            {displayText}
+                          </a>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiKeyAuth } from '@/lib/middleware';
 import { classifyCategoriesFromInput, generateBriefingStream, generateBriefing, ClassificationResult } from '@/services/llm';
-import { getAllCategories, getTranslatedHotspotsWithFallback } from '@/services/briefing';
+import { getAllCategories, getTranslatedHotspotsWithFallback, enrichSources } from '@/services/briefing';
 import { retrieveKnowledge } from '@/services/dify';
 
 // 聊天接口（个性化查询）- 支持流式和非流式输出
@@ -170,9 +170,12 @@ export async function POST(request: NextRequest) {
         // 非流式生成简报（传入历史知识）
         const { briefing, sources } = await generateBriefing(translatedItems, message, finalHistoricalKnowledge);
         
+        // 将 sources 转换为 [url, title, content][] 格式
+        const enrichedSources = await enrichSources(sources);
+        
         return NextResponse.json({
           briefing,
-          sources,
+          sources: enrichedSources,
           categories: selectedCategories,
           timeRange: finalClassificationResult.timeRange,
           keywords: finalClassificationResult.keywords,
