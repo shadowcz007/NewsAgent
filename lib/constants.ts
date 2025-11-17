@@ -48,7 +48,7 @@ export const LLM_MODEL_CLASSIFY = process.env.LLM_MODEL_CLASSIFY || "Qwen/Qwen2.
 export const LLM_MODEL_TRANSLATE = process.env.LLM_MODEL_TRANSLATE || "deepseek-ai/DeepSeek-V3";
 export const LLM_MODEL_BRIEFING = process.env.LLM_MODEL_BRIEFING || "deepseek-ai/DeepSeek-V3";
 export const LLM_MODEL_TITLE = process.env.LLM_MODEL_TITLE || "Qwen/Qwen2.5-7B-Instruct";
-
+export const LLM_MODEL_RELEVANCE = process.env.LLM_MODEL_RELEVANCE || "Qwen/Qwen2.5-7B-Instruct";
 // Dify API 配置
 export const DIFY_DATASET_ID = process.env.DIFY_DATASET_ID || "0593f5a9-d08d-4e1d-b432-5f39ae252e05";
 export const DIFY_API_KEY = process.env.DIFY_API_KEY || "dataset-kQrj2zG3jiMJfRKqu2rYCVzn";

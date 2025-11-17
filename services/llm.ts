@@ -4,6 +4,7 @@ import {
   SILICONFLOW_API_URL, 
   SILICONFLOW_MODEL,
   LLM_MODEL_CLASSIFY,
+  LLM_MODEL_RELEVANCE,
   LLM_MODEL_TRANSLATE,
   LLM_MODEL_BRIEFING,
   LLM_MODEL_TITLE
@@ -23,6 +24,7 @@ export interface TranslatedItem {
   translated_title: string;
   source_url: string;
   category: '技术工具' | '前沿研究' | '行业动态' | '其他';
+  summary?: string;
 }
 
 // 辅助函数：延迟
@@ -742,6 +744,7 @@ export async function translateAndCategorize(items: HotspotItem[]): Promise<Tran
           translated_title: item.title,
           source_url: item.url,
           category: '其他' as TranslatedItem['category'],
+          summary: item.summary || undefined, // 保留原始 summary
         }));
       }
 
@@ -752,6 +755,7 @@ export async function translateAndCategorize(items: HotspotItem[]): Promise<Tran
         category: (['技术工具', '前沿研究', '行业动态', '其他'].includes(item.category) 
           ? item.category 
           : '其他') as TranslatedItem['category'],
+        summary: batch[index]?.summary || undefined, // 保留原始 summary
       }));
 
       allResults.push(...batchResults);
@@ -769,6 +773,7 @@ export async function translateAndCategorize(items: HotspotItem[]): Promise<Tran
         translated_title: item.title,
         source_url: item.url,
         category: '其他' as TranslatedItem['category'],
+        summary: item.summary || undefined, // 保留原始 summary
       }));
       allResults.push(...fallbackResults);
       console.log(`第 ${batchNumber} 批使用后备数据，已处理 ${fallbackResults.length} 条`);
@@ -785,6 +790,240 @@ export async function translateAndCategorize(items: HotspotItem[]): Promise<Tran
   return allResults;
 }
 
+// 相关性判断的 System Prompt
+const RELEVANCE_FILTER_PROMPT = `你是一个严格的信息筛选助手。你的任务是判断资讯条目是否与用户需求高度相关。
+
+**判断标准（严格模式）**：
+- 只标记与用户需求**高度相关**的资讯
+- 资讯必须直接回答或解决用户提出的问题/需求
+- 资讯的主题、关键词、领域必须与用户需求紧密匹配
+- 如果资讯只是略微相关或间接相关，应标记为不相关
+- 如果无法确定相关性，应标记为不相关（保守策略）
+
+**输出格式**：
+- 必须输出一个 JSON 数组，每个元素包含：
+  - \`source_url\`: 资讯的 URL（字符串）
+  - \`is_relevant\`: 是否相关（布尔值，true 表示高度相关，false 表示不相关）
+- 必须使用标准英文标点符号：逗号 (,)、冒号 (:)、引号 (")
+- **严禁**使用任何中文标点符号
+- **不要**添加任何解释、说明、Markdown 代码块标记（如 \`\`\`json）或注释
+- 直接输出纯 JSON 数组
+
+**示例格式**：
+[{"source_url":"https://example.com/article1","is_relevant":true},{"source_url":"https://example.com/article2","is_relevant":false}]`;
+
+// 解析相关性判断结果的接口
+interface RelevanceResult {
+  source_url: string;
+  is_relevant: boolean;
+}
+
+// 解析相关性判断结果的函数
+function parseRelevanceResponse(response: string, batchNumber: number): RelevanceResult[] {
+  const strategies: Array<() => [string, any]> = [
+    // 策略 1: 直接解析
+    () => {
+      console.log(`相关性判断第 ${batchNumber} 批：尝试策略 1 - 直接解析`);
+      return [response, JSON.parse(response)];
+    },
+    
+    // 策略 2: 移除 markdown 代码块后解析
+    () => {
+      console.log(`相关性判断第 ${batchNumber} 批：尝试策略 2 - 移除 markdown 代码块`);
+      const cleaned = response.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      return [cleaned, JSON.parse(cleaned)];
+    },
+    
+    // 策略 3: 使用正则提取 JSON 并修复常见问题
+    () => {
+      console.log(`相关性判断第 ${batchNumber} 批：尝试策略 3 - 正则提取并修复`);
+      let cleaned = response.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      
+      // 尝试找到第一个 [ 到最后一个 ]
+      const startArray = cleaned.indexOf('[');
+      const endArray = cleaned.lastIndexOf(']');
+      
+      if (startArray === -1 || endArray === -1 || startArray >= endArray) {
+        throw new Error('No valid JSON array structure found');
+      }
+      
+      const jsonStr = cleaned.substring(startArray, endArray + 1);
+      const fixed = fixCommonJsonIssues(jsonStr);
+      return [fixed, JSON.parse(fixed)];
+    },
+    
+    // 策略 4: 字段级重建
+    () => {
+      console.log(`相关性判断第 ${batchNumber} 批：尝试策略 4 - 字段级重建`);
+      const cleaned = fixCommonJsonIssues(response);
+      
+      // 提取所有 source_url 和 is_relevant 字段
+      const urlPattern = /"source_url"\s*:\s*"([^"]+)"/g;
+      const relevancePattern = /"is_relevant"\s*:\s*(true|false)/g;
+      
+      const urls = Array.from(cleaned.matchAll(urlPattern), m => m[1]);
+      const relevances = Array.from(cleaned.matchAll(relevancePattern), m => m[1] === 'true');
+      
+      if (urls.length === 0) {
+        throw new Error('Could not extract source_url fields');
+      }
+      
+      // 重建结果数组
+      const reconstructed: RelevanceResult[] = [];
+      const minLength = Math.min(urls.length, relevances.length);
+      
+      for (let i = 0; i < minLength; i++) {
+        reconstructed.push({
+          source_url: urls[i],
+          is_relevant: relevances[i] || false,
+        });
+      }
+      
+      // 如果 urls 更多，补充缺失的 is_relevant（默认为 false）
+      for (let i = minLength; i < urls.length; i++) {
+        reconstructed.push({
+          source_url: urls[i],
+          is_relevant: false,
+        });
+      }
+      
+      if (reconstructed.length === 0) {
+        throw new Error('Could not reconstruct any results');
+      }
+      
+      const processedStr = JSON.stringify(reconstructed);
+      return [processedStr, reconstructed];
+    },
+  ];
+  
+  // 依次尝试每个策略
+  let lastError: any = null;
+  
+  for (let i = 0; i < strategies.length; i++) {
+    try {
+      const [processedString, result] = strategies[i]();
+      
+      // 验证结果是数组
+      if (!Array.isArray(result)) {
+        throw new Error('Parsed result is not an array');
+      }
+      
+      // 验证数组元素格式
+      const validResults: RelevanceResult[] = [];
+      for (const item of result) {
+        if (item && typeof item === 'object' && typeof item.source_url === 'string') {
+          validResults.push({
+            source_url: item.source_url,
+            is_relevant: item.is_relevant === true,
+          });
+        }
+      }
+      
+      if (validResults.length === 0) {
+        throw new Error('No valid results found');
+      }
+      
+      console.log(`相关性判断第 ${batchNumber} 批：策略 ${i + 1} 成功解析，得到 ${validResults.length} 条结果`);
+      return validResults;
+    } catch (error: any) {
+      lastError = error;
+      console.log(`相关性判断第 ${batchNumber} 批：策略 ${i + 1} 失败: ${error.message}`);
+    }
+  }
+  
+  // 所有策略都失败
+  throw new Error(`所有解析策略都失败。最后错误: ${lastError?.message || 'Unknown'}`);
+}
+
+// 批量过滤相关资讯
+export async function filterRelevantItems(
+  items: TranslatedItem[],
+  requirement: string
+): Promise<TranslatedItem[]> {
+  if (items.length === 0 || !requirement || !requirement.trim()) {
+    return items;
+  }
+
+  const BATCH_SIZE = 25; // 每批处理 25 条
+  const BATCH_DELAY = 5000; // 5秒延迟
+  const batches = batchArray(items, BATCH_SIZE);
+  const relevantItems: TranslatedItem[] = [];
+
+  console.log(`开始相关性过滤，共 ${items.length} 条资讯，分 ${batches.length} 批处理`);
+  // 标题console
+  console.log(Array.from(items.map(item => item.translated_title)));
+
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    const batchNumber = i + 1;
+    
+    try {
+      console.log(`相关性过滤第 ${batchNumber}/${batches.length} 批（${batch.length} 条）...`);
+
+      // 构建输入内容（包含 summary）
+      const inputContent = batch.map((item, index) => {
+        const summaryText = item.summary ? `\n   摘要: ${item.summary}` : '';
+        return `${index + 1}. 标题: ${item.translated_title}\n   URL: ${item.source_url}\n   分类: ${item.category}${summaryText}`;
+      }).join('\n\n');
+
+      const messages = [
+        { role: 'system', content: RELEVANCE_FILTER_PROMPT },
+        { role: 'user', content: `用户需求：${requirement.trim()}\n\n请判断以下资讯条目是否与用户需求高度相关：\n\n${inputContent}` },
+      ];
+
+      const response = await callSiliconFlow(messages, 0, 3, LLM_MODEL_RELEVANCE);
+      
+      // 解析相关性判断结果
+      let relevanceResults: RelevanceResult[];
+      try {
+        relevanceResults = parseRelevanceResponse(response, batchNumber);
+      } catch (parseError) {
+        console.error(`相关性过滤第 ${batchNumber} 批解析失败:`, parseError);
+        console.error(`原始响应前200字符:`, response.substring(0, 200));
+        // 解析失败时，保守策略：保留所有资讯
+        console.log(`相关性过滤第 ${batchNumber} 批：解析失败，采用保守策略保留所有资讯`);
+        relevantItems.push(...batch);
+        continue;
+      }
+
+      // 根据判断结果过滤资讯
+      const urlToItemMap = new Map<string, TranslatedItem>();
+      for (const item of batch) {
+        urlToItemMap.set(item.source_url, item);
+      }
+
+      let relevantCount = 0;
+      for (const result of relevanceResults) {
+        const item = urlToItemMap.get(result.source_url);
+        if (item && result.is_relevant) {
+          relevantItems.push(item);
+          relevantCount++;
+        }
+      }
+
+      console.log(`相关性过滤第 ${batchNumber} 批完成，保留 ${relevantCount}/${batch.length} 条相关资讯`);
+
+      // 如果不是最后一批，添加延迟
+      if (i < batches.length - 1) {
+        await delay(BATCH_DELAY);
+      }
+    } catch (error: any) {
+      console.error(`相关性过滤第 ${batchNumber} 批处理失败:`, error.message);
+      // 处理失败时，保守策略：保留所有资讯
+      console.log(`相关性过滤第 ${batchNumber} 批：处理失败，采用保守策略保留所有资讯`);
+      relevantItems.push(...batch);
+
+      // 即使失败也继续处理下一批，但添加延迟
+      if (i < batches.length - 1) {
+        await delay(BATCH_DELAY);
+      }
+    }
+  }
+
+  console.log(`相关性过滤完成，保留 ${relevantItems.length}/${items.length} 条相关资讯`);
+  return relevantItems;
+}
+
 // 生成个性化简报
 export async function generateBriefing(
   items: TranslatedItem[],
@@ -795,8 +1034,30 @@ export async function generateBriefing(
     return { briefing: '暂无热点资讯', sources: [] };
   }
 
+  // 如果有用户要求，先过滤掉不相关的资讯
+  let filteredItems = items;
+  if (customRequirement && customRequirement.trim()) {
+    try {
+      const originalCount = items.length;
+      filteredItems = await filterRelevantItems(items, customRequirement);
+      console.log(`简报生成：相关性过滤完成，从 ${originalCount} 条过滤到 ${filteredItems.length} 条`);
+      
+      // 如果过滤后没有相关资讯，返回友好提示
+      if (filteredItems.length === 0) {
+        return {
+          briefing: `根据您的需求"${customRequirement}"，未找到高度相关的资讯。请尝试调整搜索条件或扩大时间范围。`,
+          sources: [],
+        };
+      }
+    } catch (error: any) {
+      console.error('相关性过滤失败，使用所有资讯:', error);
+      // 过滤失败时，降级为使用所有资讯
+      filteredItems = items;
+    }
+  }
+
   // 构建输入内容
-  const inputContent = JSON.stringify(items, null, 2);
+  const inputContent = JSON.stringify(filteredItems, null, 2);
 
   // 构建用户提示，按顺序：历史知识 → 用户要求 → 资讯条目
   let userPrompt = '';
@@ -870,9 +1131,9 @@ export async function generateBriefing(
   } catch (error: any) {
     console.error('Error in generateBriefing:', error);
     // 返回简单的后备简报
-    const fallbackSources = Array.from(new Set(items.map(item => item.source_url)));
+    const fallbackSources = Array.from(new Set(filteredItems.map(item => item.source_url)));
     return {
-      briefing: `今日共收集 ${items.length} 条热点资讯，涵盖多个领域。`,
+      briefing: `今日共收集 ${filteredItems.length} 条热点资讯，涵盖多个领域。`,
       sources: fallbackSources,
     };
   }
@@ -900,8 +1161,29 @@ export async function* generateBriefingStream(
     return;
   }
 
+  // 如果有用户要求，先过滤掉不相关的资讯
+  let filteredItems = items;
+  if (customRequirement && customRequirement.trim()) {
+    try {
+      const originalCount = items.length;
+      filteredItems = await filterRelevantItems(items, customRequirement);
+      console.log(`简报生成（流式）：相关性过滤完成，从 ${originalCount} 条过滤到 ${filteredItems.length} 条`);
+      
+      // 如果过滤后没有相关资讯，返回友好提示
+      if (filteredItems.length === 0) {
+        yield { type: 'content', text: `根据您的需求"${customRequirement}"，未找到高度相关的资讯。请尝试调整搜索条件或扩大时间范围。` };
+        yield { type: 'done', sources: [] };
+        return;
+      }
+    } catch (error: any) {
+      console.error('相关性过滤失败，使用所有资讯:', error);
+      // 过滤失败时，降级为使用所有资讯
+      filteredItems = items;
+    }
+  }
+
   // 构建输入内容
-  const inputContent = JSON.stringify(items, null, 2);
+  const inputContent = JSON.stringify(filteredItems, null, 2);
 
   // 构建用户提示，按顺序：历史知识 → 用户要求 → 资讯条目
   let userPrompt = '';
@@ -1033,9 +1315,9 @@ export async function* generateBriefingStream(
       }
     }
 
-    // 如果没有提取到sources，使用所有items的source_url作为后备
+    // 如果没有提取到sources，使用所有filteredItems的source_url作为后备
     if (sources.length === 0) {
-      sources.push(...items.map(item => item.source_url));
+      sources.push(...filteredItems.map(item => item.source_url));
     }
 
     // 去重 sources
@@ -1048,9 +1330,9 @@ export async function* generateBriefingStream(
   } catch (error: any) {
     console.error('Error in generateBriefingStream:', error);
     // 返回错误信息
-    const fallbackSources = Array.from(new Set(items.map(item => item.source_url)));
+    const fallbackSources = Array.from(new Set(filteredItems.map(item => item.source_url)));
     const enrichedFallbackSources = await enrichSources(fallbackSources);
-    yield { type: 'content', text: `今日共收集 ${items.length} 条热点资讯，涵盖多个领域。` };
+    yield { type: 'content', text: `今日共收集 ${filteredItems.length} 条热点资讯，涵盖多个领域。` };
     yield { type: 'done', sources: enrichedFallbackSources };
   }
 }

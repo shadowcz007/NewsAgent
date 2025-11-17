@@ -364,10 +364,14 @@ function mapRowToTranslatedItem(row: HotspotRow): TranslatedItem | null {
     categoryValue = '其他';
   }
 
+  // 提取 summary（优先从原始 content 中获取，因为 summary 通常存储在 HotspotItem 中）
+  const summary = parsedContent?.summary || '';
+
   return {
     translated_title: translatedTitle,
     source_url: sourceUrl,
     category: categoryValue as TranslatedItem['category'],
+    summary: summary || undefined, // 如果为空字符串，返回 undefined
   };
 }
 
