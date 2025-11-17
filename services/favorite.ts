@@ -52,6 +52,7 @@ export function saveFavorite(
     return {
       ...existing,
       sources: existing.sources ? JSON.parse(existing.sources) : [],
+      title: existing.title || undefined,
     };
   }
 
